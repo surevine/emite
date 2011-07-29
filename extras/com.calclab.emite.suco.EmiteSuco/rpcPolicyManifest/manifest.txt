@@ -1,2 +1,0 @@
-# Module com.calclab.emite.suco.EmiteSuco
-# RPC service class, partial path of RPC policy file

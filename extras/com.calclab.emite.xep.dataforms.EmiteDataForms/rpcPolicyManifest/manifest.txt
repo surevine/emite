@@ -1,2 +1,0 @@
-# Module com.calclab.emite.xep.dataforms.EmiteDataForms
-# RPC service class, partial path of RPC policy file
