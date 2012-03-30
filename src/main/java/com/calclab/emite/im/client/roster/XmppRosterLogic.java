@@ -67,6 +67,10 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 				if (event.is(SessionStates.loggedIn)) {
 					reRequestRoster();
 				}
+				
+				if(SessionStates.isDisconnected(event.getState())) {
+					rosterReady = false;
+				}
 			}
 		});
 
@@ -218,12 +222,12 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 				@Override
 				public void onIQ(final IQ iq) {
 					if (IQ.isSuccess(iq)) {
-						clearGroupAll();
+//						clearGroupAll();
 						final List<? extends IPacket> children = iq.getFirstChild("query").getChildren();
 
 						for (final IPacket child : children) {
 							final RosterItem item = RosterItem.parse(child);
-							storeItem(item);
+							handleItemChanged(item);
 						}
 
 						if (!rosterReady) {

@@ -78,7 +78,9 @@ public class RoomChat extends RoomBoilerplate {
 	@Override
 	public void close() {
 		if (ChatStates.ready.equals(properties.getState())) {
-			session.send(new Presence(Type.unavailable, null, getURI()));
+			if(session.isReady()) {
+				session.send(new Presence(Type.unavailable, null, getURI()));
+			}
 			properties.setState(ChatStates.locked);
 		}
 	}

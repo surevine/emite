@@ -21,9 +21,12 @@
 package com.calclab.emite.core.client.bosh;
 
 import java.util.List;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.calclab.emite.core.client.conn.ConnectionSettings;
+import com.calclab.emite.core.client.conn.ConnectionStateChangedEvent;
+import com.calclab.emite.core.client.conn.ConnectionStateChangedHandler;
 import com.calclab.emite.core.client.conn.StanzaSentEvent;
 import com.calclab.emite.core.client.conn.XmppConnection;
 import com.calclab.emite.core.client.conn.XmppConnectionBoilerPlate;
@@ -45,73 +48,119 @@ import com.google.inject.Singleton;
 @Singleton
 public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	
+	/** 
+	 * Simple service to call {@link XmppBoshConnection#continueConnection()} once every so often as the connector
+	 * occasionally seems to be able to get into a state where there are no open connections (and if there are no
+	 * connections then there are no responses to trigger more connections and the client just hangs)
+	 */
+	class Heartbeat implements ScheduledAction {
+		private final XmppBoshConnection connection;
+		private final int checkMillis;
+		
+		/**
+		 * @param connection the BOSH connector
+		 * @param checkMillis the number of milliseconds to keep checking for open connections
+		 */
+		Heartbeat(XmppBoshConnection connection, int checkMillis) {
+			this.connection = connection;
+			this.checkMillis = checkMillis;
+			run();
+		}
+		
+		@Override
+		public void run() {
+			// We can safely call this as continueConnection() won't do anything if it doesn't need to
+			connection.continueConnection();
+			connection.services.schedule(this.checkMillis, this);
+		}
+	}
+	
+	/**
+	 * How many milliseconds between retries when a potentially recoverable error is detected
+	 */
+	private static final int ERROR_RETRY_PERIOD_MILLIS = 2000;
+
+	/**
+	 * How many milliseconds between calls to continueConnection.<br />
+	 * Set to zero to disable
+	 * 
+	 * @see Heartbeat
+	 */
+	private static final int HEARTBEAT_PERIOD_MILLIS = 5000;
+	
 	private static final Logger logger = Logger.getLogger(XmppBoshConnection.class.getName());
 	
 	private int activeConnections;
 	private final Services services;
 	private final ConnectorCallback listener;
 	private boolean shouldCollectResponses;
-	private final RetryControl retryControl = new RetryControl();
-
+	
 	@Inject
 	public XmppBoshConnection(final EmiteEventBus eventBus, final Services services) {
 		super(eventBus);
 		this.services = services;
+		
+		if(HEARTBEAT_PERIOD_MILLIS > 0) {
+			new Heartbeat(this, HEARTBEAT_PERIOD_MILLIS);
+		}
 
 		listener = new ConnectorCallback() {
 
 			@Override
 			public void onError(final String request, final Throwable throwable) {
+				activeConnections--;
 				if (isActive()) {
 					final int e = incrementErrors();
-					logger.severe("Connection error #" + e + ": " + throwable.getMessage());
-					if (e > retryControl.maxRetries) {
+					logger.log(Level.WARNING, "Connection error #" + e, throwable);
+					
+					// If we've been errored for longer than the "inactivity" time then there is no
+					// way we can get the session back, so we may as well just give up!
+					if((getStreamSettings() != null) && (e * ERROR_RETRY_PERIOD_MILLIS / 1000 > getStreamSettings().getInactivity())) {
+						logger.severe("Connection errored for longer than inactivity timeout (" + getStreamSettings().getInactivity() + "s) - Notifying connection error");
 						fireError("Connection error: " + throwable.toString());
 						disconnect();
-					} else {
-						final int scedTime = retryControl.retry(e);
-						fireRetry(e, scedTime);
-						services.schedule(scedTime, new ScheduledAction() {
+					} else {;
+						logger.fine("Retrying connection...");
+						fireRetry(e, ERROR_RETRY_PERIOD_MILLIS);
+						services.schedule(ERROR_RETRY_PERIOD_MILLIS, new ScheduledAction() {
 							@Override
 							public void run() {
 								logger.info("Error retry: " + e);
 								send(request);
 							}
 						});
+						logger.fine("Retry queued for " + ERROR_RETRY_PERIOD_MILLIS + "ms");
 					}
 				}
 			}
 
 			@Override
 			public void onResponseReceived(final int statusCode, final String content, final String originalRequest) {
-				clearErrors();
-				activeConnections--;
 				if (isActive()) {
-					// TODO: check if is the same code in other than FF and make
 					// tests
 					if (statusCode == 404) {
+						// We will get a 404 if the session has timed out - not much we can do here unfortunately
+						activeConnections--;
 						fireError("404 Connection Error (session removed ?!) : " + content);
 						disconnect();
 					} else if (statusCode != 200 && statusCode != 0) {
-						// setActive(false);
-						// fireError("Bad status: " + statusCode);
 						onError(originalRequest, new Exception("Bad status: " + statusCode + " " + content));
 					} else {
 						final IPacket response = services.toXML(content);
 						if (response != null && "body".equals(response.getName())) {
+							activeConnections--;
 							clearErrors();
 							fireResponse(content);
 							handleResponse(response);
 						} else {
 							onError(originalRequest, new Exception("Bad response: " + statusCode + " " + content));
-							// fireError("Bad response: " + content);
 						}
 					}
 				}
 			}
 		};
 	}
-
+	
 	@Override
 	public void connect() {
 		assert getConnectionSettings() != null : "You should set user settings before connect!";
@@ -169,7 +218,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	public boolean resume(final StreamSettings settings) {
 		setActive(true);
 		setStream(settings);
-		continueConnection(null);
+		continueConnection();
 		return isActive();
 	}
 
@@ -198,7 +247,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	 * @see http://xmpp.org/extensions/xep-0124.html#inactive
 	 * @param ack
 	 */
-	private void continueConnection(final String ack) {
+	private void continueConnection() {
 		if (isConnected() && activeConnections == 0) {
 			if (getCurrentBody() != null) {
 				sendBody();
@@ -208,7 +257,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 				services.schedule(waitTime, new ScheduledAction() {
 					@Override
 					public void run() {
-						if (getCurrentBody() == null && getStreamSettings().rid == currentRID) {
+						if (getCurrentBody() == null && getStreamSettings().rid == currentRID && activeConnections == 0) {
 							createBodyIfNeeded();
 							// Whitespace keep-alive
 							// getCurrentBody().setText(" ");
@@ -266,17 +315,20 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 			setActive(false);
 			fireDisconnected("disconnected by server");
 		} else {
-			if (getStreamSettings().sid == null) {
-				initStream(response);
-				fireConnected();
+			try {
+				if (getStreamSettings().sid == null) {
+					initStream(response);
+					fireConnected();
+				}
+				shouldCollectResponses = true;
+				final List<? extends IPacket> stanzas = response.getChildren();
+				for (final IPacket stanza : stanzas) {
+					fireStanzaReceived(stanza);
+				}
+				shouldCollectResponses = false;
+			} finally {
+				continueConnection();
 			}
-			shouldCollectResponses = true;
-			final List<? extends IPacket> stanzas = response.getChildren();
-			for (final IPacket stanza : stanzas) {
-				fireStanzaReceived(stanza);
-			}
-			shouldCollectResponses = false;
-			continueConnection(response.getAttribute("ack"));
 		}
 	}
 
@@ -302,11 +354,11 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 		try {
 			activeConnections++;
 			services.send(getConnectionSettings().httpBase, request, listener);
-			getStreamSettings().lastRequestTime = services.getCurrentTime();
-		} catch (final ConnectorException e) {
+		} catch (final Exception e) {
 			activeConnections--;
-			e.printStackTrace();
+			logger.log(Level.SEVERE, "Exception occurred on send", e);
 		}
+		getStreamSettings().lastRequestTime = services.getCurrentTime();
 	}
 
 	private void sendBody() {
