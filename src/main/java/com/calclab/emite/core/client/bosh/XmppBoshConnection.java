@@ -20,13 +20,10 @@
 
 package com.calclab.emite.core.client.bosh;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
-import org.mortbay.log.Log;
 
 import com.calclab.emite.core.client.conn.ConnectionSettings;
 import com.calclab.emite.core.client.conn.StanzaSentEvent;
@@ -86,6 +83,12 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	 * How many milliseconds between retries when a potentially recoverable error is detected
 	 */
 	private static final int ERROR_RETRY_PERIOD_MILLIS = 2000;
+	
+	/**
+	 * How many seconds to timeout the connection retry on an error if we don't have an
+	 * inactivity period defined (e.g. on initial connection attempt)
+	 */
+	private static final int ERROR_RETRY_TIMEOUT_SECONDS = 60;
 
 	/**
 	 * How many milliseconds between calls to continueConnection.<br />
@@ -131,10 +134,13 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 					
 					final String sid = getStreamSettings().sid;
 					
+					/* 
+					 * TODO If there are multiple retrying connections at once then the error count will be
+					 * artificially increased so we should handle that properly.
+					 */
 					// If we've been errored for longer than the "inactivity" time then there is no
 					// way we can get the session back, so we may as well just give up!
-					if((getStreamSettings() != null) && (getStreamSettings().getInactivity() > 0)
-							&& (e * ERROR_RETRY_PERIOD_MILLIS / 1000 > getStreamSettings().getInactivity())) {
+					if((e * ERROR_RETRY_PERIOD_MILLIS / 1000) > getErrorTimeoutMillis()) {
 						--activeConnections;
 						logger.severe("Connection errored for longer than inactivity timeout ("
 								+ getStreamSettings().getInactivity() + "s) - Notifying connection error");
@@ -417,5 +423,26 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	@Override
 	public boolean hasErrors() {
 		return !erroredRequests.isEmpty();
+	}
+
+	@Override
+	public void clearErrors() {
+		super.clearErrors();
+		
+		this.erroredRequests.clear();
+	}
+	
+	/**
+	 * Returns the number of seconds after which an errored connection should be dropped. This
+	 * is normally the inactivity period defined by the server, but may default to {@link #ERROR_RETRY_TIMEOUT_SECONDS}
+	 * if the connection has not yet been established
+	 * 
+	 * @return number of seconds.
+	 */
+	private int getErrorTimeoutMillis() {
+		if((getStreamSettings() != null) && (getStreamSettings().getInactivity() > 0))
+			return getStreamSettings().getInactivity();
+		
+		return ERROR_RETRY_TIMEOUT_SECONDS;
 	}
 }
