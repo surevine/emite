@@ -20,13 +20,15 @@
 
 package com.calclab.emite.core.client.bosh;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.mortbay.log.Log;
+
 import com.calclab.emite.core.client.conn.ConnectionSettings;
-import com.calclab.emite.core.client.conn.ConnectionStateChangedEvent;
-import com.calclab.emite.core.client.conn.ConnectionStateChangedHandler;
 import com.calclab.emite.core.client.conn.StanzaSentEvent;
 import com.calclab.emite.core.client.conn.XmppConnection;
 import com.calclab.emite.core.client.conn.XmppConnectionBoilerPlate;
@@ -34,7 +36,6 @@ import com.calclab.emite.core.client.events.EmiteEventBus;
 import com.calclab.emite.core.client.packet.IPacket;
 import com.calclab.emite.core.client.packet.Packet;
 import com.calclab.emite.core.client.services.ConnectorCallback;
-import com.calclab.emite.core.client.services.ConnectorException;
 import com.calclab.emite.core.client.services.ScheduledAction;
 import com.calclab.emite.core.client.services.Services;
 import com.google.inject.Inject;
@@ -69,9 +70,15 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 		
 		@Override
 		public void run() {
-			// We can safely call this as continueConnection() won't do anything if it doesn't need to
-			connection.continueConnection();
-			connection.services.schedule(this.checkMillis, this);
+			try {
+				// If the connection has errors then the normal retry code will be periodically trying the connection
+				if(connection.isActive() && !connection.hasErrors()) {
+					// We can safely call this as continueConnection() won't do anything if it doesn't need to
+					connection.continueConnection();
+				}
+			} finally {
+				connection.services.schedule(this.checkMillis, this);
+			}
 		}
 	}
 	
@@ -95,28 +102,42 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	private final ConnectorCallback listener;
 	private boolean shouldCollectResponses;
 	
+	/**
+	 * Maintains a set of requests which encountered errors and are currently being
+	 * retried. The class should not send any new requests if this set is non-empty
+	 */
+	private final HashSet<String> erroredRequests;
+	
 	@Inject
 	public XmppBoshConnection(final EmiteEventBus eventBus, final Services services) {
 		super(eventBus);
 		this.services = services;
 		
+		erroredRequests = new HashSet<String>();
+
 		if(HEARTBEAT_PERIOD_MILLIS > 0) {
 			new Heartbeat(this, HEARTBEAT_PERIOD_MILLIS);
 		}
-
+		
 		listener = new ConnectorCallback() {
 
 			@Override
 			public void onError(final String request, final Throwable throwable) {
-				activeConnections--;
 				if (isActive()) {
 					final int e = incrementErrors();
 					logger.log(Level.WARNING, "Connection error #" + e, throwable);
 					
+					erroredRequests.add(request);
+					
+					final String sid = getStreamSettings().sid;
+					
 					// If we've been errored for longer than the "inactivity" time then there is no
 					// way we can get the session back, so we may as well just give up!
-					if((getStreamSettings() != null) && (e * ERROR_RETRY_PERIOD_MILLIS / 1000 > getStreamSettings().getInactivity())) {
-						logger.severe("Connection errored for longer than inactivity timeout (" + getStreamSettings().getInactivity() + "s) - Notifying connection error");
+					if((getStreamSettings() != null) && (getStreamSettings().getInactivity() > 0)
+							&& (e * ERROR_RETRY_PERIOD_MILLIS / 1000 > getStreamSettings().getInactivity())) {
+						--activeConnections;
+						logger.severe("Connection errored for longer than inactivity timeout ("
+								+ getStreamSettings().getInactivity() + "s) - Notifying connection error");
 						fireError("Connection error: " + throwable.toString());
 						disconnect();
 					} else {;
@@ -125,8 +146,12 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 						services.schedule(ERROR_RETRY_PERIOD_MILLIS, new ScheduledAction() {
 							@Override
 							public void run() {
-								logger.info("Error retry: " + e);
-								send(request);
+								// If the session hasn't been changed in the meantime...
+								if((getStreamSettings().sid == null) || getStreamSettings().sid.equals(sid)) {
+									logger.info("Error retry: " + e);
+									--activeConnections;
+									send(request);
+								}
 							}
 						});
 						logger.fine("Retry queued for " + ERROR_RETRY_PERIOD_MILLIS + "ms");
@@ -150,6 +175,15 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 						if (response != null && "body".equals(response.getName())) {
 							activeConnections--;
 							clearErrors();
+							/* 
+							 * We could just call remove directly here, but by doing a separate contains check
+							 * we can log the fact that an error has recovered, and still will only be checking
+							 * the set once in the 99% no error situation
+							 */
+							if(erroredRequests.contains(originalRequest)) {
+								logger.finer("Successfully resent errored connection on session " + getStreamSettings().sid);
+								erroredRequests.remove(originalRequest);
+							}
 							fireResponse(content);
 							handleResponse(response);
 						} else {
@@ -257,7 +291,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 				services.schedule(waitTime, new ScheduledAction() {
 					@Override
 					public void run() {
-						if (getCurrentBody() == null && getStreamSettings().rid == currentRID && activeConnections == 0) {
+						if (getCurrentBody() == null && getStreamSettings().rid == currentRID && activeConnections == 0 && !hasErrors()) {
 							createBodyIfNeeded();
 							// Whitespace keep-alive
 							// getCurrentBody().setText(" ");
@@ -323,10 +357,14 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 				shouldCollectResponses = true;
 				final List<? extends IPacket> stanzas = response.getChildren();
 				for (final IPacket stanza : stanzas) {
-					fireStanzaReceived(stanza);
+					try {
+						fireStanzaReceived(stanza);
+					} catch(Exception e) {
+						logger.log(Level.WARNING, "Error occurred while processing received stanza: " + stanza.toString(), e);
+					}
 				}
-				shouldCollectResponses = false;
 			} finally {
+				shouldCollectResponses = false;
 				continueConnection();
 			}
 		}
@@ -375,5 +413,9 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 			logger.finer("Send body simply queued");
 		}
 	}
-
+	
+	@Override
+	public boolean hasErrors() {
+		return !erroredRequests.isEmpty();
+	}
 }

@@ -222,12 +222,12 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 				@Override
 				public void onIQ(final IQ iq) {
 					if (IQ.isSuccess(iq)) {
-//						clearGroupAll();
+						clearGroupAll();
 						final List<? extends IPacket> children = iq.getFirstChild("query").getChildren();
 
 						for (final IPacket child : children) {
 							final RosterItem item = RosterItem.parse(child);
-							handleItemChanged(item);
+							storeItem(item);
 						}
 
 						if (!rosterReady) {
@@ -260,22 +260,32 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 
 	}
 
-	private void handleItemChanged(final RosterItem item) {
+	private void handleItemChanged(final RosterItem item, final boolean fireEvents) {
 		final RosterItem old = getItemByJID(item.getJID());
 
 		if (old == null) { // new item
 			storeItem(item);
-			eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.added, item));
+			if (fireEvents) {
+				eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.added, item));
+			}
 		} else { // update or remove
 			final SubscriptionState subscriptionState = item.getSubscriptionState();
 			if (subscriptionState == SubscriptionState.remove) {
 				removeItem(old);
-				eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.removed, old));
+				if (fireEvents) {
+					eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.removed, old));
+				}
 			} else {
 				updateExistingItem(old, item);
-				eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.modified, old));
+				if (fireEvents) {
+					eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.modified, old));
+				}
 			}
 		}
+	}
+
+	private void handleItemChanged(final RosterItem item) {
+		handleItemChanged(item, true);
 	}
 
 	private void removeItem(final RosterItem item) {

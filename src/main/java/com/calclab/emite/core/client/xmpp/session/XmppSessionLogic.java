@@ -201,8 +201,7 @@ public class XmppSessionLogic extends XmppSessionBoilerPlate {
 
 	@Override
 	public void send(final IPacket packet) {
-		// Added a condition to check the connection is not retrying...
-		if (connection.hasErrors() || userUri == null) {
+		if (userUri == null) {
 			logger.finer("session queuing stanza" + packet);
 			queuedStanzas.add(packet);
 		} else {
