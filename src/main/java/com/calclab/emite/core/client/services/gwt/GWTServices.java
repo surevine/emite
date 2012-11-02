@@ -47,7 +47,12 @@ public class GWTServices implements Services {
 
 	@Override
 	public void send(final String httpBase, final String request, final ConnectorCallback listener) throws ConnectorException {
-		GWTConnector.send(httpBase, request, listener);
+		GWTConnector.send(httpBase, request, listener, Services.DEFAULT_TIMEOUT_MILLIS);
+	}
+
+	@Override
+	public void send(final String httpBase, final String request, final ConnectorCallback listener, final int timeoutMillis) throws ConnectorException {
+		GWTConnector.send(httpBase, request, listener, timeoutMillis);
 	}
 
 	@Override

@@ -23,7 +23,7 @@ package com.calclab.emite.core.client.bosh;
 public class StreamSettings {
 	public long rid;
 	public String sid;
-	public String wait;
+	private int wait;
 	private int inactivity;
 	long lastRequestTime;
 	private int maxPause;
@@ -69,4 +69,15 @@ public class StreamSettings {
 		}
 	}
 
+	public void setWait(final String wait) {
+		try {
+			this.wait = Integer.parseInt(wait);
+		} catch (final NumberFormatException e) {
+			this.wait = 0;
+		}
+	}
+
+	public int getWait() {
+		return wait;
+	}
 }

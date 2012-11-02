@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.calclab</groupId>
 	<artifactId>emite</artifactId>
-	<version>surevine-65</version>
+	<version>surevine-65-fixes</version>
 	<packaging>jar</packaging>
 	<name>Emite</name>
 	<description>A pure Google Web Toolkit XMPP library</description>
@@ -23,6 +23,7 @@
 		<!-- GWT 2.2+ needs java 1.6 -->
 		<maven.compiler.source>1.6</maven.compiler.source>
 		<maven.compiler.target>1.6</maven.compiler.target>
+		<maven.test.skip>true</maven.test.skip>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 	</properties>
 

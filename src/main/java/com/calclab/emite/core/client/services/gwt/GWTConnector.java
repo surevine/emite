@@ -26,6 +26,7 @@ import java.util.logging.Logger;
 
 import com.calclab.emite.core.client.services.ConnectorCallback;
 import com.calclab.emite.core.client.services.ConnectorException;
+import com.calclab.emite.core.client.services.ScheduledAction;
 import com.google.gwt.event.logical.shared.CloseEvent;
 import com.google.gwt.event.logical.shared.CloseHandler;
 import com.google.gwt.http.client.Request;
@@ -57,11 +58,16 @@ public class GWTConnector {
 		});
 	}
 
-	public static void send(final String httpBase, final String request, final ConnectorCallback listener) throws ConnectorException {
+	public static void send(final String httpBase, final String request, final ConnectorCallback listener, final int timeoutMillis) throws ConnectorException {
 		final RequestBuilder builder = new RequestBuilder(RequestBuilder.POST, httpBase);
 		builder.setHeader("Content-Type", "text/xml; charset=utf-8");
 		builder.setHeader("Cache-Control", "no-cache");
 		builder.setHeader("Pragma", "no-cache");
+		
+		if(timeoutMillis > 0) {
+			builder.setTimeoutMillis(timeoutMillis);
+		}
+		
 		// TODO : Hard coded timeout to 6s, but we should set it to the wait + a
 		// delta
 		// builder.setTimeoutMillis(6000);
@@ -80,6 +86,7 @@ public class GWTConnector {
 					listener.onResponseReceived(res.getStatusCode(), res.getText(), request);
 				}
 			});
+			
 			activeRequests.add(req);
 		} catch (final RequestException e) {
 			throw new ConnectorException(e.getMessage());
@@ -88,5 +95,4 @@ public class GWTConnector {
 			throw new ConnectorException(e.getMessage());
 		}
 	}
-
 }

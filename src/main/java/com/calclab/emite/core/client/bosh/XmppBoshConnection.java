@@ -35,6 +35,7 @@ import com.calclab.emite.core.client.packet.Packet;
 import com.calclab.emite.core.client.services.ConnectorCallback;
 import com.calclab.emite.core.client.services.ScheduledAction;
 import com.calclab.emite.core.client.services.Services;
+import com.google.gwt.core.client.GWT;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
@@ -89,7 +90,14 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	 * inactivity period defined (e.g. on initial connection attempt)
 	 */
 	private static final int ERROR_RETRY_TIMEOUT_SECONDS = 60;
-
+	
+	/**
+	 * How many seconds to add to the inactivity period for the connection timeout. Essentially
+	 * if we haven't had a reply from the server after inactivity + this value then the connection
+	 * will time out.
+	 */
+	private static final int DEFAULT_CONNECTION_TIMEOUT_MILLIS = 120000; // 2 minutes
+	
 	/**
 	 * How many milliseconds between calls to continueConnection.<br />
 	 * Set to zero to disable
@@ -180,7 +188,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 						final IPacket response = services.toXML(content);
 						if (response != null && "body".equals(response.getName())) {
 							activeConnections--;
-							clearErrors();
+//							clearErrors();
 							/* 
 							 * We could just call remove directly here, but by doing a separate contains check
 							 * we can log the fact that an error has recovered, and still will only be checking
@@ -379,7 +387,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	private void initStream(final IPacket response) {
 		final StreamSettings stream = getStreamSettings();
 		stream.sid = response.getAttribute("sid");
-		stream.wait = response.getAttribute("wait");
+		stream.setWait(response.getAttribute("wait"));
 		stream.setInactivity(response.getAttribute("inactivity"));
 		stream.setMaxPause(response.getAttribute("maxpause"));
 	}
@@ -397,7 +405,10 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	private void send(final String request) {
 		try {
 			activeConnections++;
-			services.send(getConnectionSettings().httpBase, request, listener);
+			
+			GWT.log("Timeout: " + getConnectionTimeoutMillis());
+			
+			services.send(getConnectionSettings().httpBase, request, listener, getConnectionTimeoutMillis());
 		} catch (final Exception e) {
 			activeConnections--;
 			logger.log(Level.SEVERE, "Exception occurred on send", e);
@@ -440,9 +451,20 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	 * @return number of seconds.
 	 */
 	private int getErrorTimeoutMillis() {
-		if((getStreamSettings() != null) && (getStreamSettings().getInactivity() > 0))
-			return getStreamSettings().getInactivity();
+		if((getStreamSettings() != null) && (getStreamSettings().getWait() > 0)) {
+			return getStreamSettings().getWait();
+		}
 		
 		return ERROR_RETRY_TIMEOUT_SECONDS;
+	}
+	
+	private int getConnectionTimeoutMillis() {
+		if((getStreamSettings() != null)
+				&& (getStreamSettings().getWait() > 0)
+				&& (getStreamSettings().getInactivity() > 0)) {
+			return ( getStreamSettings().getWait() + ( getStreamSettings().getInactivity() / 2 ) ) * 1000;
+		}
+		
+		return DEFAULT_CONNECTION_TIMEOUT_MILLIS;
 	}
 }
