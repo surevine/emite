@@ -27,8 +27,10 @@ import org.junit.Test;
 
 import com.calclab.emite.core.client.conn.ConnectionSettings;
 import com.calclab.emite.core.client.events.EmiteEventBus;
+import com.calclab.emite.core.client.packet.Packet;
 import com.calclab.emite.xtesting.EmiteTestsEventBus;
 import com.calclab.emite.xtesting.ServicesTester;
+import com.calclab.emite.xtesting.ServicesTester.Request;
 import com.calclab.emite.xtesting.matchers.IsPacketLike;
 
 public class XmppBoshConnectionTests {
@@ -50,5 +52,18 @@ public class XmppBoshConnectionTests {
 		final IsPacketLike matcher = IsPacketLike.build("<body to='localhost' " + "content='text/xml; charset=utf-8' xmlns:xmpp='urn:xmpp:xbosh' "
 				+ " ack='1' hold='1' secure='true' xml:lang='en' " + "xmpp:version='1.0' wait='60' xmlns='http://jabber.org/protocol/httpbind' />");
 		assertTrue(matcher.matches(services.getSentPacket(0), System.out));
+	}
+	
+	@Test
+	public void testConnectionTimeout() {
+		connection.setSettings(new ConnectionSettings("httpBase", "localhost", "1.6", 30, 50, 2));
+		connection.connect();
+		Request request = services.getLastRequest();
+		request.listener.onResponseReceived(200, "<body sid='sid' wait='30' inactivity='50' maxpause='300' />", request.request);
+		
+		connection.send(new Packet("test"));
+		request = services.getLastRequest();
+		int expectedTimeout = 55000; // 30s + (50s / 2)
+		assertEquals("Incorrect connection timeout", expectedTimeout, request.timeoutMillis);
 	}
 }

@@ -65,6 +65,10 @@ public class ServicesTester implements Services {
 		final String request = requests.get(index).request;
 		return xmler.toXML(request);
 	}
+	
+	public Request getLastRequest() {
+		return requests.get(requests.size() - 1);
+	}
 
 	public int requestSentCount() {
 		return requests.size();

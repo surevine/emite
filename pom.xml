@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.calclab</groupId>
 	<artifactId>emite</artifactId>
-	<version>surevine-65-fixes-SNAPSHOT</version>
+	<version>surevine-66-SNAPSHOT</version>
 	<packaging>jar</packaging>
 	<name>Emite</name>
 	<description>A pure Google Web Toolkit XMPP library</description>
@@ -23,7 +23,6 @@
 		<!-- GWT 2.2+ needs java 1.6 -->
 		<maven.compiler.source>1.6</maven.compiler.source>
 		<maven.compiler.target>1.6</maven.compiler.target>
-		<maven.test.skip>true</maven.test.skip>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 	</properties>
 
@@ -102,6 +101,8 @@
 					<includes>**/*GwtTest.java</includes>
 					<mode>htmlunit</mode>
 					<htmlunit>IE6,IE7,FF3</htmlunit>
+					<!-- TODO Fix the GWT tests -->
+		          <skipTests>true</skipTests>
    				</configuration>
 				<executions>
 					<execution>
@@ -123,7 +124,6 @@
 					</excludes>
 				</configuration>
 			</plugin>
-			
 			<!-- Tell the jar plugin to also create a jar of all the test classes -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
