@@ -35,6 +35,7 @@ import com.calclab.emite.core.client.packet.Packet;
 import com.calclab.emite.core.client.services.ConnectorCallback;
 import com.calclab.emite.core.client.services.ScheduledAction;
 import com.calclab.emite.core.client.services.Services;
+import com.google.gwt.core.client.GWT;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
@@ -85,11 +86,18 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	private static final int ERROR_RETRY_PERIOD_MILLIS = 2000;
 	
 	/**
-	 * How many seconds to timeout the connection retry on an error if we don't have an
-	 * inactivity period defined (e.g. on initial connection attempt)
+	 * How many seconds to timeout the connection retry on an error if we don't have a
+	 * wait period defined (e.g. on initial connection attempt)
 	 */
-	private static final int ERROR_RETRY_TIMEOUT_SECONDS = 60;
-
+	private static final int DEFAULT_ERROR_RETRY_TIMEOUT_MILLIS = 60000;
+	
+	/**
+	 * How many seconds to add to the inactivity period for the connection timeout. Essentially
+	 * if we haven't had a reply from the server after inactivity + this value then the connection
+	 * will time out.
+	 */
+	private static final int DEFAULT_CONNECTION_TIMEOUT_MILLIS = 120000; // 2 minutes
+	
 	/**
 	 * How many milliseconds between calls to continueConnection.<br />
 	 * Set to zero to disable
@@ -140,7 +148,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 					 */
 					// If we've been errored for longer than the "inactivity" time then there is no
 					// way we can get the session back, so we may as well just give up!
-					if((e * ERROR_RETRY_PERIOD_MILLIS / 1000) > getErrorTimeoutMillis()) {
+					if((e * ERROR_RETRY_PERIOD_MILLIS) > getErrorTimeoutMillis()) {
 						--activeConnections;
 						logger.severe("Connection errored for longer than inactivity timeout ("
 								+ getStreamSettings().getInactivity() + "s) - Notifying connection error");
@@ -180,7 +188,6 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 						final IPacket response = services.toXML(content);
 						if (response != null && "body".equals(response.getName())) {
 							activeConnections--;
-							clearErrors();
 							/* 
 							 * We could just call remove directly here, but by doing a separate contains check
 							 * we can log the fact that an error has recovered, and still will only be checking
@@ -379,7 +386,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	private void initStream(final IPacket response) {
 		final StreamSettings stream = getStreamSettings();
 		stream.sid = response.getAttribute("sid");
-		stream.wait = response.getAttribute("wait");
+		stream.setWait(response.getAttribute("wait"));
 		stream.setInactivity(response.getAttribute("inactivity"));
 		stream.setMaxPause(response.getAttribute("maxpause"));
 	}
@@ -397,7 +404,10 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	private void send(final String request) {
 		try {
 			activeConnections++;
-			services.send(getConnectionSettings().httpBase, request, listener);
+			
+			GWT.log("Timeout: " + getConnectionTimeoutMillis());
+			
+			services.send(getConnectionSettings().httpBase, request, listener, getConnectionTimeoutMillis());
 		} catch (final Exception e) {
 			activeConnections--;
 			logger.log(Level.SEVERE, "Exception occurred on send", e);
@@ -433,16 +443,35 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	}
 	
 	/**
-	 * Returns the number of seconds after which an errored connection should be dropped. This
-	 * is normally the inactivity period defined by the server, but may default to {@link #ERROR_RETRY_TIMEOUT_SECONDS}
+	 * Returns the number of milliseconds after which an errored connection should be dropped. This
+	 * is normally the inactivity period defined by the server, but may default to {@link #DEFAULT_ERROR_RETRY_TIMEOUT_MILLIS}
 	 * if the connection has not yet been established
 	 * 
-	 * @return number of seconds.
+	 * @return number of milliseconds.
 	 */
 	private int getErrorTimeoutMillis() {
-		if((getStreamSettings() != null) && (getStreamSettings().getInactivity() > 0))
-			return getStreamSettings().getInactivity();
+		if((getStreamSettings() != null) && (getStreamSettings().getInactivity() > 0)) {
+			return getStreamSettings().getInactivity() * 1000;
+		}
 		
-		return ERROR_RETRY_TIMEOUT_SECONDS;
+		return DEFAULT_ERROR_RETRY_TIMEOUT_MILLIS;
+	}
+	
+	/**
+	 * Returns the number of seconds to time out any http requests to the server. This is
+	 * normally the "wait" time plus half the "inactivity" time, but may default to
+	 * {@link #DEFAULT_CONNECTION_TIMEOUT_MILLIS} if the connection has not yet been
+	 * established.
+	 * 
+	 * @return number of milliseconds.
+	 */
+	private int getConnectionTimeoutMillis() {
+		if((getStreamSettings() != null)
+				&& (getStreamSettings().getWait() > 0)
+				&& (getStreamSettings().getInactivity() > 0)) {
+			return ( getStreamSettings().getWait() + ( getStreamSettings().getInactivity() / 2 ) ) * 1000;
+		}
+		
+		return DEFAULT_CONNECTION_TIMEOUT_MILLIS;
 	}
 }
