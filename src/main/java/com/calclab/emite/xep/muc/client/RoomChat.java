@@ -185,6 +185,9 @@ public class RoomChat extends RoomBoilerplate {
 		invite.setAttribute("to", userJid.toString());
 		final IPacket reason = invite.addChild("reason", null);
 		reason.setText(reasonText);
+		
+		message.setTextToChild("body", reasonText);	// Openfire won't store the invitation offline unless it has a body
+		
 		chatEventBus.fireEvent(new BeforeRoomInvitationSendEvent(message, invite));
 		session.send(message);
 		chatEventBus.fireEvent(new RoomInvitationSentEvent(userJid, reasonText));
