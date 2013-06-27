@@ -155,5 +155,25 @@ public class RoomTest extends AbstractChatTest {
 				+ "<x xmlns='jabber:x:data' type='submit'/></query></iq>");
 		session.answerSuccess();
 	}
+	
+	@Test
+	public void testCloseRemovesAllOccupants() {
+		final OccupantChangedTestHandler handler = new OccupantChangedTestHandler("removed");
+		room.addOccupantChangedHandler(handler);
+		
+		receiveInstantRoomCreation(userURI, roomURI);
+		
+		final XmppURI occupantUri = uri("room@domain/name");
+		room.setOccupantPresence(userURI, occupantUri, "owner", "participant", Show.notSpecified, null);
+		
+		final XmppURI user2Uri = uri("user2@domain/res");
+		final XmppURI occupant2Uri = uri("room@domain/name2");
+		room.setOccupantPresence(user2Uri, occupant2Uri, "admin", "moderator", Show.notSpecified, null);
+
+		room.close();
+		
+		// 3 = The owner and the 2 other occupants
+		assertEquals(3, handler.getCalledTimes());
+	}
 
 }

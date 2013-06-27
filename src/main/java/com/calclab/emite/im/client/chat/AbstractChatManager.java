@@ -42,6 +42,7 @@ public abstract class AbstractChatManager extends ChatManagerBoilerplate {
 
 	@Override
 	public void close(final Chat chat) {
+		managerEventBus.fireEvent(new ChatChangedEvent(ChangeTypes.closing, chat));
 		chat.close();
 		getChats().remove(chat);
 		managerEventBus.fireEvent(new ChatChangedEvent(ChangeTypes.closed, chat));

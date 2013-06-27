@@ -118,6 +118,8 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	 * retried. The class should not send any new requests if this set is non-empty
 	 */
 	private final HashSet<String> erroredRequests;
+
+	private int clientTimeout = 5000;
 	
 	@Inject
 	public XmppBoshConnection(final EmiteEventBus eventBus, final Services services) {
@@ -467,11 +469,20 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	 */
 	private int getConnectionTimeoutMillis() {
 		if((getStreamSettings() != null)
-				&& (getStreamSettings().getWait() > 0)
-				&& (getStreamSettings().getInactivity() > 0)) {
-			return ( getStreamSettings().getWait() + ( getStreamSettings().getInactivity() / 2 ) ) * 1000;
+				&& (getStreamSettings().getWait() > 0)) {
+			return ( getStreamSettings().getWait() * 1000 + clientTimeout );
 		}
 		
 		return DEFAULT_CONNECTION_TIMEOUT_MILLIS;
+	}
+
+	/**
+	 * Sets the clientTimeout fudge factor. This will be added to the "wait"
+	 * time and used as the timeout value for http connections.
+	 * 
+	 * @param clientTimeout the timeout period in milliseconds
+	 */
+	public void setClientTimeout(int clientTimeout) {
+		this.clientTimeout = clientTimeout;
 	}
 }
