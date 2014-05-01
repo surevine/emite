@@ -26,7 +26,6 @@ import java.util.logging.Logger;
 
 import com.calclab.emite.core.client.services.ConnectorCallback;
 import com.calclab.emite.core.client.services.ConnectorException;
-import com.calclab.emite.core.client.services.ScheduledAction;
 import com.google.gwt.event.logical.shared.CloseEvent;
 import com.google.gwt.event.logical.shared.CloseHandler;
 import com.google.gwt.http.client.Request;

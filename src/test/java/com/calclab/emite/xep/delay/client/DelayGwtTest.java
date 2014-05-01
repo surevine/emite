@@ -22,9 +22,8 @@ package com.calclab.emite.xep.delay.client;
 
 import static com.calclab.emite.core.client.xmpp.stanzas.XmppURI.uri;
 
-import java.util.Calendar;
 import java.util.Date;
-import java.util.TimeZone;
+import java.util.Calendar;
 
 import org.junit.Test;
 
@@ -65,8 +64,10 @@ public class DelayGwtTest extends GWTTestCase {
 		final Delay delay = new Delay(delayNode);
 		assertNotNull(delay);
 
-		final Date date = new Date(80, 3, 15, 17, 15, 2);
-		date.setTime(date.getTime() - (date.getTimezoneOffset() * 60000));
+		final Calendar cal = Calendar.getInstance();
+		cal.set(1980, 3, 15, 17, 15, 2);
+		final Date date = cal.getTime();
+		date.setTime(date.getTime() - cal.getTimeZone().getRawOffset());
 		
 		assertEquals(uri, delay.getFrom());
 		assertEquals(date, delay.getStamp());
