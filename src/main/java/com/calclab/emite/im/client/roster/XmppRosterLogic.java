@@ -92,16 +92,19 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 
 				final boolean wasAvailable = item.getAvailableResources().contains(resource);
 
-				if (type == Presence.Type.unavailable) {
+				if (type == Presence.Type.unavailable ||
+					type == Presence.Type.error) {
 					if (wasAvailable) {
 						hasChanged = true;
 						item.setAvailable(false, resource);
 					}
-				} else {
+				} else if (type == null) {
 					if (!wasAvailable) {
 						hasChanged = true;
 						item.setAvailable(true, resource);
 					}
+				} else {
+					return; // Do not try to process other stanzas.
 				}
 				final Show showReceived = presence.getShow();
 				final Show newShow = showReceived == null ? Show.notSpecified : showReceived;
