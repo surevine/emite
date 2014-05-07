@@ -187,6 +187,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 					} else if (statusCode != 200 && statusCode != 0) {
 						onError(originalRequest, new Exception("Bad status: " + statusCode + " " + content));
 					} else {
+						GWT.log("++ Inbound content from request, " + content.length() + " bytes.");
 						final IPacket response = services.toXML(content);
 						if (response != null && "body".equals(response.getName())) {
 							activeConnections--;
@@ -202,6 +203,11 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 							fireResponse(content);
 							handleResponse(response);
 						} else {
+							if (response == null) {
+								GWT.log("Erk; response is null, maybe it's not XML?");
+							} else {
+								GWT.log("Response root node is " + response.getName());
+							}
 							onError(originalRequest, new Exception("Bad response: " + statusCode + " " + content));
 						}
 					}
@@ -371,8 +377,10 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 				}
 				shouldCollectResponses = true;
 				final List<? extends IPacket> stanzas = response.getChildren();
+				GWT.log("** Processing " + stanzas.size() + " stanzas");
 				for (final IPacket stanza : stanzas) {
 					try {
+						//GWT.log("I got a packet: " + stanza.getName() + " " + stanza.getAttribute("xmlns"));
 						fireStanzaReceived(stanza);
 					} catch(Exception e) {
 						logger.log(Level.WARNING, "Error occurred while processing received stanza: " + stanza.toString(), e);
