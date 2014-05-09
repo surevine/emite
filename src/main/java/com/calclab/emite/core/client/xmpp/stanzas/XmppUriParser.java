@@ -93,7 +93,7 @@ public class XmppUriParser {
 		if (domain.length() == 0)
 			return null;
 
-		return XmppURI.uri(node, domain, resource);
+		return XmppURI.uri_or_null(node, domain, resource);
 	}
 
 	public static String removePrefix(final String xmppUri) {

@@ -20,6 +20,9 @@
 
 package com.calclab.emite.core.client.xmpp.stanzas;
 
+import com.calclab.emite.base.stringprep.Stringprep;
+import com.calclab.emite.base.stringprep.StringprepException;
+
 /**
  * Defines a XMPP URI.
  * 
@@ -65,12 +68,29 @@ public class XmppURI implements HasJID {
 	 * @param resource
 	 *            the resource of the uri
 	 * @return a XmppURI object, never null
+	 * @throws StringprepException 
+	 * @throws NullPointerException 
 	 */
 
-	public static XmppURI uri(final String node, final String host, final String resource) {
+	public static XmppURI uri(final String node, final String host, final String resource) throws NullPointerException, StringprepException {
 		final XmppURI xmppURI = new XmppURI(node, host, resource);
 		factory.cache(xmppURI);
 		return xmppURI;
+	}
+	/**
+	 * As uri(), but may return null if the arguments are invalid.
+	 * 
+	 * @param node
+	 * @param host
+	 * @param resource
+	 * @return XmppURI or null
+	 */
+	public static XmppURI uri_or_null(final String node, final String host, final String resource) {
+		try {
+			return uri(node, host, resource);
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	private final String host;
@@ -85,14 +105,16 @@ public class XmppURI implements HasJID {
 	 *            <code> resource      = *( unreserved / escaped )
                 reserved      = ";" / "/" / "?" / ":" / "@" / "&" / "=" / "+" /
                 "$" / "," / "[" / "]" </code>
+	 * @throws StringprepException 
+	 * @throws NullPointerException 
 	 * 
 	 */
-	private XmppURI(final String node, final String host, final String resource) {
+	private XmppURI(final String node, final String host, final String resource) throws NullPointerException, StringprepException {
 		assert host != null : "Host can't be null";
-		this.node = node != null ? node.toLowerCase() : node;
-		this.host = host.toLowerCase();
-		this.resource = resource != null ? resource : null;
-		representation = (this.node != null ? this.node + "@" : "") + this.host + (this.resource != null ? "/" + this.resource : "");
+		this.node = node != null ? Stringprep.nodeprep(node) : null;
+		this.host = Stringprep.nameprep(host);
+		this.resource = resource != null ? Stringprep.resourceprep(resource) : null;
+		this.representation = (this.node != null ? this.node + "@" : "") + this.host + (this.resource != null ? "/" + this.resource : "");
 	}
 
 	@Override
@@ -125,7 +147,7 @@ public class XmppURI implements HasJID {
 	 * @return a new XmppURI object with the same host as this one
 	 */
 	public XmppURI getHostURI() {
-		return uri(null, host, null);
+		return uri_or_null(null, host, null);
 	}
 
 	/**
@@ -135,7 +157,7 @@ public class XmppURI implements HasJID {
 	 */
 	@Override
 	public XmppURI getJID() {
-		return uri(node, host, null);
+		return uri_or_null(node, host, null);
 	}
 
 	/**

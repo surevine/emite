@@ -208,7 +208,7 @@ public class RoomChat extends RoomBoilerplate {
 
 	@Override
 	public void sendPrivateMessage(final Message message, final String nick) {
-		message.setTo(XmppURI.uri(getURI().getNode(), getURI().getHost(), nick));
+		message.setTo(XmppURI.uri_or_null(getURI().getNode(), getURI().getHost(), nick));
 		message.setType(Message.Type.chat);
 		super.send(message);
 	}
