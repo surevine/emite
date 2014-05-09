@@ -30,6 +30,7 @@ package com.calclab.emite.base.stringprep;
 public class StringprepException
   extends Exception
 {
+  private static final long serialVersionUID = 6448380141943657370L;
   public static String CONTAINS_UNASSIGNED = "Contains unassigned code points.";
   public static String CONTAINS_PROHIBITED = "Contains prohibited code points.";
   public static String BIDI_BOTHRAL = "Contains both R and AL code points.";

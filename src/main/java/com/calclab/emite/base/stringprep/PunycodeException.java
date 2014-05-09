@@ -30,6 +30,7 @@ package com.calclab.emite.base.stringprep;
 public class PunycodeException
   extends Exception
 {
+  private static final long serialVersionUID = 2581820466781672282L;
   public static String OVERFLOW = "Overflow.";
   public static String BAD_INPUT = "Bad input.";
 

@@ -30,6 +30,7 @@ package com.calclab.emite.base.stringprep;
 public class IDNAException
   extends Exception
 {
+  private static final long serialVersionUID = -6099638934466245239L;
   public static String CONTAINS_NON_LDH = "Contains non-LDH characters.";
   public static String CONTAINS_HYPHEN = "Leading or trailing hyphen not allowed.";
   public static String CONTAINS_ACE_PREFIX = "ACE prefix (xn--) not allowed.";
