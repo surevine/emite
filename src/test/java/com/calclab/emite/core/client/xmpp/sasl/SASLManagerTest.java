@@ -85,7 +85,15 @@ public class SASLManagerTest {
 		assertNotNull(authEvent);
 		assertTrue(authEvent.isSucceed());
 	}
-
+	
+	@Test(expected = RuntimeException.class) // Actually, this throws an UnexpectedChallenge exception, but GWT hides that.
+	public void shouldRejectSuccessWhenAuthorizationSentWithData() {
+		manager.sendAuthorizationRequest(credentials(uri("me@domain"), "password"), mechanisms_with_plain);
+		connection.receives("<success xmlns=\"urn:ietf:params:xml:ns:xmpp-sasl\">1234</success>");
+		assert(authEvent == null);
+		assertFalse(authEvent.isSucceed());
+	}
+	
 	@Test
 	public void shouldHandleFailure() {
 		manager.sendAuthorizationRequest(credentials(uri("node@domain"), "password"), mechanisms_with_plain);
@@ -106,6 +114,30 @@ public class SASLManagerTest {
 		manager.sendAuthorizationRequest(credentials(uri("node@domain/resource"), "password"), mechanisms_with_plain);
 		final IPacket packet = new Packet("auth", "urn:ietf:params:xml:ns:xmpp-sasl").With("mechanism", "PLAIN");
 		assertTrue(connection.hasSent(packet));
+	}
+
+	@Test
+	public void shouldHandleChallenge() {
+		manager.sendAuthorizationRequest(credentials(uri("node@domain/resource"), "password"), mechanisms_with_plain);
+		final IPacket packet = new Packet("auth", "urn:ietf:params:xml:ns:xmpp-sasl").With("mechanism", "PLAIN");
+		assertTrue(connection.hasSent(packet));
+		connection.receives("<challenge xmlns=\"urn:ietf:params:xml:ns:xmpp-sasl\"/>");
+		final IPacket packet2 = new Packet("response", "urn:ietf:params:xml:ns:xmpp-sasl");
+		assertTrue(connection.hasSent(packet2));
+	}
+
+	@Test(expected = SASLManager.NoMechanisms.class)
+	public void shouldFailIfPlainMissing() {
+		manager.sendAuthorizationRequest(credentials(uri("node@domain/resource"), "password"), mechanisms_with_unknown);
+		final IPacket packet = new Packet("auth", "urn:ietf:params:xml:ns:xmpp-sasl").With("mechanism", "PLAIN");
+		assertFalse(connection.hasSent(packet));
+	}
+
+	@Test(expected = SASLManager.NoMechanisms.class)
+	public void shouldFailIfNoMechanisms() {
+		manager.sendAuthorizationRequest(credentials(uri("node@domain/resource"), "password"), mechanisms_empty);
+		final IPacket packet = new Packet("auth", "urn:ietf:params:xml:ns:xmpp-sasl").With("mechanism", "PLAIN");
+		assertFalse(connection.hasSent(packet));
 	}
 
 	@Test

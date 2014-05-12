@@ -42,6 +42,18 @@ public class SASLManager {
 		boolean success(String additionalData);
 		String getName();
 	}
+	class UnexpectedChallenge extends RuntimeException {
+		private static final long serialVersionUID = 1891035940672367035L;
+		public UnexpectedChallenge(final String msg) { super(msg); }
+	}
+	class NoMechanisms extends RuntimeException {
+		private static final long serialVersionUID = 8036427387321214035L;
+		public NoMechanisms(final String msg) { super(msg); }
+	}
+	class MutualAuthFailure extends RuntimeException {
+		private static final long serialVersionUID = 7510053687939485562L;
+		public MutualAuthFailure(final String msg) { super(msg); }
+	}
 	
 	private static final String SEP = new String(new char[] { 0 });
 	private static final String XMLNS = "urn:ietf:params:xml:ns:xmpp-sasl";
@@ -103,12 +115,15 @@ public class SASLManager {
 			eventBus.fireEvent(new AuthorizationResultEvent(currentCredentials));
 			currentCredentials = null;
 		} else {
-			throw new RuntimeException("Post-success SASL validation failed.");
+			throw new MutualAuthFailure("Post-success SASL validation failed.");
 		}
 	}
 	
 	public void sendAuthorizationResponse(final IPacket stanza) {
-		
+		final String challenge = decodeSASL(stanza.getText());
+		final IPacket response = new Packet("response", XMLNS);
+		response.setText(encodeSASL(currentMechanism.nextResponse(challenge)));
+		connection.send(response);
 	}
 	
 	private static final String decodeSASL(final String input) {
@@ -157,13 +172,13 @@ public class SASLManager {
 		}
 		public final String nextResponse(final String resp) {
 			if (resp != null) {
-				throw new RuntimeException("Server gave a challenge to PLAIN: " + resp);
+				throw new UnexpectedChallenge("Server gave a challenge to PLAIN: " + resp);
 			}
 			return this.initialResponse();
 		}
 		public boolean success(final String anything) {
 			if (anything != null) {
-				throw new RuntimeException("Server gave additional data with success to PLAIN: " + anything);
+				throw new UnexpectedChallenge("Server gave additional data with success to PLAIN: " + anything);
 			}
 			return true;
 		}
@@ -175,13 +190,15 @@ public class SASLManager {
 	private IPacket createAuthorization(final Credentials credentials, final List<? extends IPacket> mech_elements) {
 		final List<String> mechs = new ArrayList<String>();
 		for (IPacket mech_el : mech_elements) {
-			mechs.add(mech_el.getText().toUpperCase());
+			String mech_name = mech_el.getText();
+			if (mech_name == null) continue;
+			mechs.add(mech_name.toUpperCase());
 		}
 		if (mechs.contains("PLAIN")) {
 			this.currentMechanism = new SASLManager.Plain(credentials);
 		}
 		if (this.currentMechanism == null) {
-			throw new RuntimeException("No available mechanisms for authentication");
+			throw new NoMechanisms("No available mechanisms for authentication");
 		}
 		final IPacket auth = new Packet("auth", XMLNS).With("mechanism", currentMechanism.getName());
 		auth.setText(encodeSASL(currentMechanism.initialResponse()));
