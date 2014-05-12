@@ -20,11 +20,15 @@
 
 package com.calclab.emite.core.client.xmpp.sasl;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.calclab.emite.core.client.conn.StanzaEvent;
 import com.calclab.emite.core.client.conn.StanzaHandler;
 import com.calclab.emite.core.client.conn.XmppConnection;
 import com.calclab.emite.core.client.events.EmiteEventBus;
 import com.calclab.emite.core.client.packet.IPacket;
+import com.calclab.emite.core.client.packet.MatcherFactory;
 import com.calclab.emite.core.client.packet.Packet;
 import com.calclab.emite.core.client.xmpp.session.Credentials;
 import com.google.inject.Inject;
@@ -32,6 +36,13 @@ import com.google.inject.Singleton;
 
 @Singleton
 public class SASLManager {
+	interface Mechanism {
+		String initialResponse();
+		String nextResponse(String challenge);
+		boolean success(String additionalData);
+		String getName();
+	}
+	
 	private static final String SEP = new String(new char[] { 0 });
 	private static final String XMLNS = "urn:ietf:params:xml:ns:xmpp-sasl";
 
@@ -39,6 +50,7 @@ public class SASLManager {
 	private final DecoderRegistry decoders;
 	private final EmiteEventBus eventBus;
 	private Credentials currentCredentials;
+	private Mechanism currentMechanism;
 
 	@Inject
 	public SASLManager(final XmppConnection connection, final DecoderRegistry decoders) {
@@ -51,12 +63,18 @@ public class SASLManager {
 			public void onStanza(final StanzaEvent event) {
 				final IPacket stanza = event.getStanza();
 				final String name = stanza.getName();
-				if ("failure".equals(name)) { // & XMLNS
-					eventBus.fireEvent(new AuthorizationResultEvent());
-				} else if ("success".equals(name)) {
-					eventBus.fireEvent(new AuthorizationResultEvent(currentCredentials));
+				if (!XMLNS.equals(stanza.getAttribute("xmlns"))) {
+					return;
 				}
-				currentCredentials = null;
+				if ("challenge".equals(name)) {
+					sendAuthorizationResponse(stanza);
+				} else if ("failure".equals(name)) {
+					eventBus.fireEvent(new AuthorizationResultEvent());
+					currentCredentials = null;
+					currentMechanism = null;
+				} else if ("success".equals(name)) {
+					handleSuccess(stanza);
+				}
 			}
 		});
 	}
@@ -70,10 +88,50 @@ public class SASLManager {
 		AuthorizationResultEvent.bind(eventBus, handler);
 	}
 
-	public void sendAuthorizationRequest(final Credentials credentials) {
+	public void sendAuthorizationRequest(final Credentials credentials, IPacket mech_feature) {
 		currentCredentials = credentials;
-		final IPacket response = credentials.isAnoymous() ? createAnonymousAuthorization() : createPlainAuthorization(credentials);
+		final List<? extends IPacket> mechs = mech_feature.getChildren(MatcherFactory.byName("mechanism"));
+		final IPacket response = credentials.isAnoymous() ? createAnonymousAuthorization() : createAuthorization(credentials, mechs);
 		connection.send(response);
+	}
+	
+	public void handleSuccess(final IPacket stanza) {
+		// take(drugs); // This turned out to be ineffective.
+		// buyPetMonkey(); // Don't do this, either.
+		final String additionalData = decodeSASL(stanza.getText());
+		if (currentMechanism.success(additionalData)) {
+			eventBus.fireEvent(new AuthorizationResultEvent(currentCredentials));
+			currentCredentials = null;
+		} else {
+			throw new RuntimeException("Post-success SASL validation failed.");
+		}
+	}
+	
+	public void sendAuthorizationResponse(final IPacket stanza) {
+		
+	}
+	
+	private static final String decodeSASL(final String input) {
+		String challenge = null;
+		if (input == null) {
+			return null;
+		}
+		if (input.equals("=")) {
+			challenge = "";
+		} else {
+			challenge = Base64Coder.decodeString(input);
+		}
+		return challenge;
+	}
+	
+	private static final String encodeSASL(final String output) {
+		if (output == null) {
+			return null;
+		}
+		if (output.equals("")) {
+			return "=";
+		}
+		return Base64Coder.encodeString(output);
 	}
 
 	private IPacket createAnonymousAuthorization() {
@@ -81,23 +139,53 @@ public class SASLManager {
 		return auth;
 	}
 
-	private IPacket createPlainAuthorization(final Credentials credentials) {
-		final IPacket auth = new Packet("auth", XMLNS).With("mechanism", "PLAIN");
+	class Plain implements Mechanism {
+		Credentials credentials;
+		public Plain(final Credentials creds) {
+			this.credentials = creds;
+		}
+		public final String initialResponse() {
+			final String userName = credentials.getXmppUri().getNode();
+			final PasswordDecoder decoder = decoders.getDecoder(credentials.getEncodingMethod());
 
-		final PasswordDecoder decoder = decoders.getDecoder(credentials.getEncodingMethod());
+			if (decoder == null)
+				throw new RuntimeException("No password decoder found to convert from " + credentials.getEncodingMethod() + "to " + Credentials.ENCODING_BASE64);
 
-		if (decoder == null)
-			throw new RuntimeException("No password decoder found to convert from " + credentials.getEncodingMethod() + "to " + Credentials.ENCODING_BASE64);
-
-		final String decodedPassword = decoder.decode(credentials.getEncodingMethod(), credentials.getEncodedPassword());
-		final String encoded = encodeForPlainMethod(credentials.getXmppUri().getHost(), credentials.getXmppUri().getNode(), decodedPassword);
-		auth.setText(encoded);
-		return auth;
+			final String password = decoder.decode(credentials.getEncodingMethod(), credentials.getEncodedPassword());
+			final String auth = userName + "@" + credentials.getXmppUri().getHost() + SEP + userName + SEP + password;
+			return auth;
+		}
+		public final String nextResponse(final String resp) {
+			if (resp != null) {
+				throw new RuntimeException("Server gave a challenge to PLAIN: " + resp);
+			}
+			return this.initialResponse();
+		}
+		public boolean success(final String anything) {
+			if (anything != null) {
+				throw new RuntimeException("Server gave additional data with success to PLAIN: " + anything);
+			}
+			return true;
+		}
+		public final String getName() {
+			return "PLAIN";
+		}
 	}
-
-	private String encodeForPlainMethod(final String domain, final String userName, final String password) {
-		final String auth = userName + "@" + domain + SEP + userName + SEP + password;
-		return Base64Coder.encodeString(auth);
+	
+	private IPacket createAuthorization(final Credentials credentials, final List<? extends IPacket> mech_elements) {
+		final List<String> mechs = new ArrayList<String>();
+		for (IPacket mech_el : mech_elements) {
+			mechs.add(mech_el.getText().toUpperCase());
+		}
+		if (mechs.contains("PLAIN")) {
+			this.currentMechanism = new SASLManager.Plain(credentials);
+		}
+		if (this.currentMechanism == null) {
+			throw new RuntimeException("No available mechanisms for authentication");
+		}
+		final IPacket auth = new Packet("auth", XMLNS).With("mechanism", currentMechanism.getName());
+		auth.setText(encodeSASL(currentMechanism.initialResponse()));
+		return auth;
 	}
 
 }
