@@ -37,22 +37,26 @@ import com.google.inject.Singleton;
 @Singleton
 public class SASLManager {
 	interface Mechanism {
-		String initialResponse();
-		String nextResponse(String challenge);
-		boolean success(String additionalData);
+		byte[] initialResponse();
+		byte[] nextResponse(byte[] challenge);
+		boolean success(byte[] additionalData);
 		String getName();
 	}
-	class UnexpectedChallenge extends RuntimeException {
+	public static class UnexpectedChallenge extends RuntimeException {
 		private static final long serialVersionUID = 1891035940672367035L;
 		public UnexpectedChallenge(final String msg) { super(msg); }
 	}
-	class NoMechanisms extends RuntimeException {
+	public static class NoMechanisms extends RuntimeException {
 		private static final long serialVersionUID = 8036427387321214035L;
 		public NoMechanisms(final String msg) { super(msg); }
 	}
-	class MutualAuthFailure extends RuntimeException {
+	public static class MutualAuthFailure extends RuntimeException {
 		private static final long serialVersionUID = 7510053687939485562L;
 		public MutualAuthFailure(final String msg) { super(msg); }
+	}
+	public static class MalformedChallenge extends RuntimeException {
+		private static final long serialVersionUID = -4273947057481759221L;
+		public MalformedChallenge(final String msg) { super(msg); }
 	}
 	
 	private static final String SEP = new String(new char[] { 0 });
@@ -110,7 +114,7 @@ public class SASLManager {
 	public void handleSuccess(final IPacket stanza) {
 		// take(drugs); // This turned out to be ineffective.
 		// buyPetMonkey(); // Don't do this, either.
-		final String additionalData = decodeSASL(stanza.getText());
+		final byte[] additionalData = decodeSASL(stanza.getText());
 		if (currentMechanism.success(additionalData)) {
 			eventBus.fireEvent(new AuthorizationResultEvent(currentCredentials));
 			currentCredentials = null;
@@ -120,33 +124,31 @@ public class SASLManager {
 	}
 	
 	public void sendAuthorizationResponse(final IPacket stanza) {
-		final String challenge = decodeSASL(stanza.getText());
+		final byte[] challenge = decodeSASL(stanza.getText());
 		final IPacket response = new Packet("response", XMLNS);
 		response.setText(encodeSASL(currentMechanism.nextResponse(challenge)));
 		connection.send(response);
 	}
 	
-	private static final String decodeSASL(final String input) {
-		String challenge = null;
+	private static final byte[] decodeSASL(final String input) {
 		if (input == null) {
 			return null;
 		}
 		if (input.equals("=")) {
-			challenge = "";
+			return new byte[0];
 		} else {
-			challenge = Base64Coder.decodeString(input);
+			return Base64Coder.decode(input.toCharArray());
 		}
-		return challenge;
 	}
 	
-	private static final String encodeSASL(final String output) {
+	private static final String encodeSASL(final byte[] output) {
 		if (output == null) {
 			return null;
 		}
-		if (output.equals("")) {
+		if (output.length == 0) {
 			return "=";
 		}
-		return Base64Coder.encodeString(output);
+		return new String(Base64Coder.encode(output));
 	}
 
 	private IPacket createAnonymousAuthorization() {
@@ -155,11 +157,13 @@ public class SASLManager {
 	}
 
 	class Plain implements Mechanism {
-		Credentials credentials;
-		public Plain(final Credentials creds) {
+		final Credentials credentials;
+		final DecoderRegistry decoders;
+		public Plain(final Credentials creds, final DecoderRegistry decoders) {
 			this.credentials = creds;
+			this.decoders = decoders;
 		}
-		public final String initialResponse() {
+		public final byte[] initialResponse() {
 			final String userName = credentials.getXmppUri().getNode();
 			final PasswordDecoder decoder = decoders.getDecoder(credentials.getEncodingMethod());
 
@@ -168,15 +172,15 @@ public class SASLManager {
 
 			final String password = decoder.decode(credentials.getEncodingMethod(), credentials.getEncodedPassword());
 			final String auth = userName + "@" + credentials.getXmppUri().getHost() + SEP + userName + SEP + password;
-			return auth;
+			return auth.getBytes();
 		}
-		public final String nextResponse(final String resp) {
+		public final byte[] nextResponse(final byte[] resp) {
 			if (resp != null) {
 				throw new UnexpectedChallenge("Server gave a challenge to PLAIN: " + resp);
 			}
 			return this.initialResponse();
 		}
-		public boolean success(final String anything) {
+		public boolean success(final byte[] anything) {
 			if (anything != null) {
 				throw new UnexpectedChallenge("Server gave additional data with success to PLAIN: " + anything);
 			}
@@ -194,8 +198,10 @@ public class SASLManager {
 			if (mech_name == null) continue;
 			mechs.add(mech_name.toUpperCase());
 		}
-		if (mechs.contains("PLAIN")) {
-			this.currentMechanism = new SASLManager.Plain(credentials);
+		if (mechs.contains("SCRAM-SHA-1")) {
+			this.currentMechanism = new ScramSHA1Client(credentials, decoders);
+		} else if (mechs.contains("PLAIN")) {
+			this.currentMechanism = new SASLManager.Plain(credentials, decoders);
 		}
 		if (this.currentMechanism == null) {
 			throw new NoMechanisms("No available mechanisms for authentication");

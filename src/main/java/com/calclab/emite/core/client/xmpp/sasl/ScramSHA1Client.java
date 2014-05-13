@@ -20,26 +20,15 @@
 
 package com.calclab.emite.core.client.xmpp.sasl;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
-
 import java.util.Arrays;
-import java.util.List;
 import java.util.Random;
 
-import javax.annotation.Nullable;
+import com.calclab.emite.core.client.xmpp.session.Credentials;
 
-import com.calclab.emite.base.crypto.HMac;
-import com.calclab.emite.base.crypto.PBKDF2;
-import com.calclab.emite.base.crypto.SHA1Digest;
-import com.calclab.emite.base.util.Base64;
-import com.google.common.base.Splitter;
-import com.google.common.collect.Lists;
-
-public final class ScramSHA1Client extends AbstractSaslClient {
+public final class ScramSHA1Client implements SASLManager.Mechanism {
 
 	private static enum State {
-		START, AUTH, DONE
+		IR, START, AUTH, DONE, FAIL
 	};
 
 	private static final Random random = new Random();
@@ -51,81 +40,126 @@ public final class ScramSHA1Client extends AbstractSaslClient {
 	private int icount;
 
 	private State state;
+	
+	private Credentials credentials;
+	private DecoderRegistry decoders;
 
-	public ScramSHA1Client(final Credentials credentials) {
-		super("SCRAM-SHA-1", credentials);
-		state = State.START;
+	public ScramSHA1Client(final Credentials credentials, final DecoderRegistry decoders) {
+		this.credentials = credentials;
+		this.decoders = decoders;
+		state = State.IR;
 		gs2hdr = "n,,"; // no channel binding, no authzid
 		final byte[] rnd = new byte[16];
 		random.nextBytes(rnd);
-		cnonce = Base64.toBase64(rnd);
+		cnonce = new String(Base64Coder.encode(rnd));
+	}
+	
+	// Force a particular cnonce for testing.
+	public void forceCnonce(final String cnonce) {
+		this.cnonce = cnonce;
+	}
+	
+	@Override
+	public String getName() {
+		return "SCRAM-SHA-1";
 	}
 
 	@Override
-	@Nullable
-	public byte[] getInitialResponse() {
-		checkState(state == State.START);
-
-		return (gs2hdr + "n=" + quote(credentials.getURI().getNode()) + ",r=" + cnonce).getBytes();
+	public byte[] initialResponse() {
+		/// checkState(state == State.IR);
+		state = State.START;
+		return (gs2hdr + "n=" + quote(credentials.getXmppUri().getNode()) + ",r=" + cnonce).getBytes();
 	}
 
 	@Override
-	@Nullable
-	public byte[] evaluateChallenge(byte[] challenge) throws SaslException {
-		checkState(!isComplete());
-
-		final List<String> split = Lists.newArrayList(Splitter.on(',').split(new String(challenge)));
-
+	public byte[] nextResponse(byte[] challenge) {
 		switch (state) {
+		case IR:
+			if (challenge != null) throw new SASLManager.UnexpectedChallenge("Challenge sent before IR");
+			return initialResponse();
 		case START:
-			checkArgument(split.get(0).startsWith("r="));
-			checkArgument(split.get(1).startsWith("s="));
-			checkArgument(split.get(2).startsWith("i="));
-
-			snonce = split.get(0).substring(2);
-			if (!snonce.startsWith(cnonce))
-				throw new SaslException("Invalid server nonce");
-
-			salt = Base64.fromBase64(split.get(1).substring(2));
-			icount = Integer.parseInt(split.get(2).substring(2));
+			String[] bits = new String(challenge).split(",");
+			for (String item : bits) {
+				if (item.charAt(1) != '=') {
+					throw new SASLManager.MalformedChallenge("Expected equals sign.");
+				}
+				switch (item.charAt(0)) {
+				case 's':
+					salt = Base64Coder.decode(item.substring(2));
+					break;
+				case 'r':
+					snonce = item.substring(2);
+					if (!snonce.startsWith(cnonce))
+						throw new SASLManager.MalformedChallenge("Invalid server nonce");
+					break;
+				case 'i':
+					icount = Integer.parseInt(item.substring(2));
+					break;
+				}
+			}
 
 			state = State.AUTH;
-			return ("c=" + Base64.toBase64(gs2hdr.getBytes()) + ",r=" + snonce + ",p=" + Base64.toBase64(clientProof())).getBytes();
+			return ("c=" + new String(Base64Coder.encode(gs2hdr.getBytes())) + ",r=" + snonce + ",p=" + new String(Base64Coder.encode(clientProof()))).getBytes();
 		case AUTH:
-			checkArgument(split.get(0).startsWith("v="));
+			state = State.FAIL;
+			String[] bits2 = new String(challenge).split(",");
+			for (String item : bits2) {
+				if (item.charAt(1) != '=') {
+					throw new SASLManager.MalformedChallenge("Expected equals sign.");
+				}
+				switch (item.charAt(0)) {
+				case 'v':
+					final byte[] serverSignature = Base64Coder.decode(item.substring(2));
+					if (Arrays.equals(serverSignature, serverSignature()))
+						state = State.DONE;
+					break;
+				}
+			}
 			
-			final byte[] serverSignature = Base64.fromBase64(split.get(0).substring(2));
-			
-			if (!Arrays.equals(serverSignature, serverSignature()))
-				throw new SaslException("Invalid server signature");
-
 			state = State.DONE;
-			complete = true;
 			return null;
+		case DONE:
+		case FAIL:
+			if (challenge != null) throw new SASLManager.UnexpectedChallenge("Authentication is complete");
 		default:
-			throw new SaslException("Authentication is complete");
+			throw new SASLManager.UnexpectedChallenge("Authentication is complete");
 		}
+	}
+	
+	@Override
+	public boolean success(final byte[] verifier) {
+		return (nextResponse(verifier) == null && state == State.DONE);
 	}
 
 	private final byte[] authMessage() {
-		final String cfm = "n=" + quote(credentials.getURI().getNode()) + ",r=" + cnonce;
-		final String sfm = "r=" + snonce + ",s=" + Base64.toBase64(salt) + ",i=" + Integer.toString(icount);
-		final String clm = "c=" + Base64.toBase64(gs2hdr.getBytes()) + ",r=" + snonce;
+		final String cfm = "n=" + quote(credentials.getXmppUri().getNode()) + ",r=" + cnonce;
+		final String sfm = "r=" + snonce + ",s=" + new String(Base64Coder.encode(salt)) + ",i=" + Integer.toString(icount);
+		final String clm = "c=" + new String(Base64Coder.encode(gs2hdr.getBytes())) + ",r=" + snonce;
 		return (cfm + "," + sfm + "," + clm).getBytes();
+	}
+	
+	private String getPassword() {
+		final PasswordDecoder decoder = decoders.getDecoder(credentials.getEncodingMethod());
+
+		if (decoder == null)
+			throw new RuntimeException("No password decoder found to convert from " + credentials.getEncodingMethod() + "to " + Credentials.ENCODING_BASE64);
+
+		final String password = decoder.decode(credentials.getEncodingMethod(), credentials.getEncodedPassword());
+		return password;
 	}
 
 	private final byte[] clientProof() {
-		final byte[] saltedPassword = new PBKDF2().doKey(credentials.getPassword().getBytes(), salt, icount);
-		final byte[] clientKey = new HMac().doMac(saltedPassword, "Client Key".getBytes());
-		final byte[] storedKey = new SHA1Digest().doHash(clientKey);
-		final byte[] clientSignature = new HMac().doMac(storedKey, authMessage());
+		final byte[] saltedPassword = CryptoUtils.PBKDF2(getPassword().getBytes(), salt, icount);
+		final byte[] clientKey = CryptoUtils.HMAC(saltedPassword, "Client Key".getBytes());
+		final byte[] storedKey = CryptoUtils.SHA1(clientKey);
+		final byte[] clientSignature = CryptoUtils.HMAC(storedKey, authMessage());
 		return XOR(clientKey, clientSignature);
 	}
 
 	private final byte[] serverSignature() {
-		final byte[] saltedPassword = new PBKDF2().doKey(credentials.getPassword().getBytes(), salt, icount);
-		final byte[] serverKey = new HMac().doMac(saltedPassword, "Server Key".getBytes());
-		return new HMac().doMac(serverKey, authMessage());
+		final byte[] saltedPassword = CryptoUtils.PBKDF2(getPassword().getBytes(), salt, icount);
+		final byte[] serverKey = CryptoUtils.HMAC(saltedPassword, "Server Key".getBytes());
+		return CryptoUtils.HMAC(serverKey, authMessage());
 	}
 
 	private static final String quote(final String input) {
@@ -133,7 +167,7 @@ public final class ScramSHA1Client extends AbstractSaslClient {
 	}
 
 	private static final byte[] XOR(final byte[] a, final byte[] b) {
-		checkArgument(a.length == b.length, "Both arrays must be the same length");
+		// checkArgument(a.length == b.length, "Both arrays must be the same length");
 
 		final byte[] r = new byte[a.length];
 		for (int i = 0; i < a.length; i++) {

@@ -4,6 +4,7 @@ import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator;
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.crypto.PBEParametersGenerator;
 import org.bouncycastle.crypto.digests.SHA1Digest;
+import org.bouncycastle.crypto.macs.HMac;
 
 /*
  * This is PBKDF2 (PKCS#5, RFC 2898), using HMAC and SHA-1.
@@ -22,6 +23,14 @@ public class CryptoUtils {
 		h.update(input, 0, input.length);
 		byte[] output = new byte[SHA1BITS/8];
 		h.doFinal(output, 0);
+		return output;
+	}
+	static public byte[] HMAC(byte[] key, byte[] message) {
+		HMac h = new HMac(new SHA1Digest());
+		h.init(new KeyParameter(key));
+		byte[] output = new byte[SHA1BITS];
+		h.update(message, 0, message.length);
+		h.doFinal(output,  0);
 		return output;
 	}
 }
