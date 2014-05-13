@@ -164,6 +164,34 @@ public class SASLManagerTest {
 		assertTrue(connection.hasSent(packet));
 	}
 
+	@Test
+	public void scramXorTest() {
+		byte[] one = new byte[4];
+		for (int i=0; i!=4; ++i) {
+			one[i] = (byte) 0xFF;
+		}
+		byte[] two = new byte[4];
+		two[0] = 0x00;
+		two[1] = 0x0F;
+		two[2] = (byte)0xF0;
+		two[3] = (byte)0xFF;
+		byte[] three = ScramSHA1Client.XOR(one, two);
+		assertTrue(three[0] == (byte)0xFF);
+		assertTrue(three[1] == (byte)0xF0);
+		assertTrue(three[2] == (byte)0x0F);
+		assertTrue(three[3] == (byte)0x00);
+	}
+	
+	@Test
+	public void scramExampleTest() {
+		ScramSHA1Client mech = new ScramSHA1Client(credentials(uri("user@domain"), "pencil"), new DecoderRegistry());
+		mech.forceCnonce("fyko+d2lbbFgONRv9qkxdawL");
+		assertTrue(new String(mech.initialResponse()).equals("n,,n=user,r=fyko+d2lbbFgONRv9qkxdawL"));
+		String clientFinal = new String(mech.nextResponse("r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096".getBytes()));
+		assertTrue(clientFinal.equals("c=biws,r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,p=v0X8v3Bz2T0CJGbJQyF0X+HI4Ts="));
+		assertTrue(mech.success("v=rmF9pqV8S7suAoZWja4dJRkFsKQ=".getBytes()));
+	}
+
 	private Credentials credentials(final XmppURI uri, final String password) {
 		final Credentials credentials = new Credentials(uri, password, Credentials.ENCODING_NONE);
 		return credentials;

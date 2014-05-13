@@ -28,7 +28,7 @@ public class CryptoUtils {
 	static public byte[] HMAC(byte[] key, byte[] message) {
 		HMac h = new HMac(new SHA1Digest());
 		h.init(new KeyParameter(key));
-		byte[] output = new byte[SHA1BITS];
+		byte[] output = new byte[SHA1BITS/8];
 		h.update(message, 0, message.length);
 		h.doFinal(output,  0);
 		return output;

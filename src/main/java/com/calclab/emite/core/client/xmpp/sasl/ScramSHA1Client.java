@@ -38,11 +38,15 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 	private String snonce;
 	private byte[] salt;
 	private int icount;
+	private byte[] cacheSaltedPassword;
 
 	private State state;
 	
 	private Credentials credentials;
 	private DecoderRegistry decoders;
+	
+	String clientFirstMessageBare;
+	byte[] authMessage;
 
 	public ScramSHA1Client(final Credentials credentials, final DecoderRegistry decoders) {
 		this.credentials = credentials;
@@ -52,6 +56,7 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 		final byte[] rnd = new byte[16];
 		random.nextBytes(rnd);
 		cnonce = new String(Base64Coder.encode(rnd));
+		this.cacheSaltedPassword = null;
 	}
 	
 	// Force a particular cnonce for testing.
@@ -68,7 +73,8 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 	public byte[] initialResponse() {
 		/// checkState(state == State.IR);
 		state = State.START;
-		return (gs2hdr + "n=" + quote(credentials.getXmppUri().getNode()) + ",r=" + cnonce).getBytes();
+		this.clientFirstMessageBare = "n=" + quote(credentials.getXmppUri().getNode()) + ",r=" + cnonce;
+		return (gs2hdr + this.clientFirstMessageBare).getBytes();
 	}
 
 	@Override
@@ -99,7 +105,8 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 			}
 
 			state = State.AUTH;
-			return ("c=" + new String(Base64Coder.encode(gs2hdr.getBytes())) + ",r=" + snonce + ",p=" + new String(Base64Coder.encode(clientProof()))).getBytes();
+			String clientFinalMessage = "c=" + new String(Base64Coder.encode(gs2hdr.getBytes())) + ",r=" + snonce;
+			return (clientFinalMessage + ",p=" + new String(Base64Coder.encode(clientProof(clientFinalMessage, new String(challenge))))).getBytes();
 		case AUTH:
 			state = State.FAIL;
 			String[] bits2 = new String(challenge).split(",");
@@ -131,13 +138,6 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 		return (nextResponse(verifier) == null && state == State.DONE);
 	}
 
-	private final byte[] authMessage() {
-		final String cfm = "n=" + quote(credentials.getXmppUri().getNode()) + ",r=" + cnonce;
-		final String sfm = "r=" + snonce + ",s=" + new String(Base64Coder.encode(salt)) + ",i=" + Integer.toString(icount);
-		final String clm = "c=" + new String(Base64Coder.encode(gs2hdr.getBytes())) + ",r=" + snonce;
-		return (cfm + "," + sfm + "," + clm).getBytes();
-	}
-	
 	private String getPassword() {
 		final PasswordDecoder decoder = decoders.getDecoder(credentials.getEncodingMethod());
 
@@ -147,26 +147,32 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 		final String password = decoder.decode(credentials.getEncodingMethod(), credentials.getEncodedPassword());
 		return password;
 	}
+	
+	private final byte[] saltedPassword() {
+		if (this.cacheSaltedPassword == null) {
+			this.cacheSaltedPassword = CryptoUtils.PBKDF2(getPassword().getBytes(), salt, icount);
+		}
+		return this.cacheSaltedPassword;
+	}
 
-	private final byte[] clientProof() {
-		final byte[] saltedPassword = CryptoUtils.PBKDF2(getPassword().getBytes(), salt, icount);
-		final byte[] clientKey = CryptoUtils.HMAC(saltedPassword, "Client Key".getBytes());
+	private final byte[] clientProof(String clientFinal, String serverFirst) {
+		final byte[] clientKey = CryptoUtils.HMAC(saltedPassword(), "Client Key".getBytes());
 		final byte[] storedKey = CryptoUtils.SHA1(clientKey);
-		final byte[] clientSignature = CryptoUtils.HMAC(storedKey, authMessage());
+		this.authMessage = (clientFirstMessageBare + "," + serverFirst + "," + clientFinal).getBytes();
+		final byte[] clientSignature = CryptoUtils.HMAC(storedKey, authMessage);
 		return XOR(clientKey, clientSignature);
 	}
 
 	private final byte[] serverSignature() {
-		final byte[] saltedPassword = CryptoUtils.PBKDF2(getPassword().getBytes(), salt, icount);
-		final byte[] serverKey = CryptoUtils.HMAC(saltedPassword, "Server Key".getBytes());
-		return CryptoUtils.HMAC(serverKey, authMessage());
+		final byte[] serverKey = CryptoUtils.HMAC(saltedPassword(), "Server Key".getBytes());
+		return CryptoUtils.HMAC(serverKey, authMessage);
 	}
 
 	private static final String quote(final String input) {
 		return input.replace("=", "=3D").replace(",", "=2C");
 	}
 
-	private static final byte[] XOR(final byte[] a, final byte[] b) {
+	public static final byte[] XOR(final byte[] a, final byte[] b) {
 		// checkArgument(a.length == b.length, "Both arrays must be the same length");
 
 		final byte[] r = new byte[a.length];
