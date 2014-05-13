@@ -40,6 +40,7 @@ public class SASLManagerTest {
 	protected AuthorizationResultEvent authEvent;
 	private IPacket mechanisms_with_plain;
 	private IPacket mechanisms_with_anonymous;
+	private IPacket mechanisms_with_scram;
 	private IPacket mechanisms_with_unknown;
 	private IPacket mechanisms_empty;
 
@@ -61,6 +62,15 @@ public class SASLManagerTest {
 		tmp = new Packet("mechanism");
 		tmp.setText("PLAIN");
 		mechanisms_with_plain.addChild(tmp);
+		mechanisms_with_scram = new Packet("mechanisms", "urn:ietf:params:xml:ns:xmpp-sasl");
+		tmp = new Packet("mechanism");
+		mechanisms_with_scram.addChild(tmp);
+		tmp.setText("UNKNOWN");
+		tmp = new Packet("mechanism");
+		tmp.setText("PLAIN");
+		mechanisms_with_scram.addChild(tmp);
+		tmp.setText("SCRAM-SHA-1");
+		mechanisms_with_scram.addChild(tmp);
 		mechanisms_with_anonymous = new Packet("mechanisms", "urn:ietf:params:xml:ns:xmpp-sasl");
 		tmp = new Packet("mechanism");
 		tmp.setText("ANONYMOUS");
@@ -110,9 +120,16 @@ public class SASLManagerTest {
 	}
 
 	@Test
-	public void shouldSendPlainAuthorizationUnlessAnonymous() {
+	public void shouldSendPlainAuthorizationIfOnlyPlain() {
 		manager.sendAuthorizationRequest(credentials(uri("node@domain/resource"), "password"), mechanisms_with_plain);
 		final IPacket packet = new Packet("auth", "urn:ietf:params:xml:ns:xmpp-sasl").With("mechanism", "PLAIN");
+		assertTrue(connection.hasSent(packet));
+	}
+
+	@Test
+	public void shouldSendScramAuthorizationIfAvailable() {
+		manager.sendAuthorizationRequest(credentials(uri("node@domain/resource"), "password"), mechanisms_with_scram);
+		final IPacket packet = new Packet("auth", "urn:ietf:params:xml:ns:xmpp-sasl").With("mechanism", "SCRAM-SHA-1");
 		assertTrue(connection.hasSent(packet));
 	}
 
