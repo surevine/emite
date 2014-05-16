@@ -175,7 +175,7 @@ public class SASLManagerTest {
 		two[1] = 0x0F;
 		two[2] = (byte)0xF0;
 		two[3] = (byte)0xFF;
-		byte[] three = ScramSHA1Client.XOR(one, two);
+		byte[] three = CryptoUtils.XOR(one, two);
 		assertTrue(three[0] == (byte)0xFF);
 		assertTrue(three[1] == (byte)0xF0);
 		assertTrue(three[2] == (byte)0x0F);

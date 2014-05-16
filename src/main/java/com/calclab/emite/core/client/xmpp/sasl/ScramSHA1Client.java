@@ -160,7 +160,7 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 		final byte[] storedKey = CryptoUtils.SHA1(clientKey);
 		this.authMessage = (clientFirstMessageBare + "," + serverFirst + "," + clientFinal).getBytes();
 		final byte[] clientSignature = CryptoUtils.HMAC(storedKey, authMessage);
-		return XOR(clientKey, clientSignature);
+		return CryptoUtils.XOR(clientKey, clientSignature);
 	}
 
 	private final byte[] serverSignature() {
@@ -172,15 +172,5 @@ public final class ScramSHA1Client implements SASLManager.Mechanism {
 		return input.replace("=", "=3D").replace(",", "=2C");
 	}
 
-	public static final byte[] XOR(final byte[] a, final byte[] b) {
-		// checkArgument(a.length == b.length, "Both arrays must be the same length");
-
-		final byte[] r = new byte[a.length];
-		for (int i = 0; i < a.length; i++) {
-			r[i] = (byte) (a[i] ^ b[i]);
-		}
-
-		return r;
-	}
 
 }
