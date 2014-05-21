@@ -20,10 +20,11 @@
 
 package com.calclab.emite.xtesting.handlers;
 
-import com.calclab.emite.xep.vcard.VCardResponse;
-import com.calclab.emite.xep.vcard.VCardResponseEvent;
+import com.calclab.emite.xep.vcard.client.VCardResponse;
+import com.calclab.emite.xep.vcard.client.events.VCardResponseEvent;
+import com.calclab.emite.xep.vcard.client.events.VCardResponseHandler;
 
-public class VCardResponseTestHandler extends TestHandler<VCardResponseEvent> implements VCardResponseEvent.Handler {
+public class VCardResponseTestHandler extends TestHandler<VCardResponseEvent> implements VCardResponseHandler {
 
 	public VCardResponse getLastVCardResponse() {
 		return hasEvent() ? getLastEvent().getVCardResponse() : null;

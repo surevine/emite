@@ -26,41 +26,32 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
-import java.util.List;
 
-import com.calclab.emite.base.xml.HasXML;
-import com.calclab.emite.base.xml.XMLBuilder;
-import com.calclab.emite.base.xml.XMLPacket;
-import com.calclab.emite.core.IQCallback;
-import com.calclab.emite.core.XmppURI;
-import com.calclab.emite.core.conn.StreamSettings;
-import com.calclab.emite.core.conn.XmppConnection;
-import com.calclab.emite.core.events.IQReceivedEvent;
-import com.calclab.emite.core.events.MessageReceivedEvent;
-import com.calclab.emite.core.events.PresenceReceivedEvent;
-import com.calclab.emite.core.sasl.Credentials;
-import com.calclab.emite.core.session.SASLManager;
-import com.calclab.emite.core.session.SessionStatus;
-import com.calclab.emite.core.session.XmppSessionImpl;
-import com.calclab.emite.core.stanzas.IQ;
-import com.calclab.emite.core.stanzas.Message;
-import com.calclab.emite.core.stanzas.Presence;
-import com.calclab.emite.core.stanzas.Stanza;
-import com.calclab.emite.core.stanzas.IQ.Type;
+import com.calclab.emite.core.client.bosh.StreamSettings;
+import com.calclab.emite.core.client.events.IQReceivedEvent;
+import com.calclab.emite.core.client.events.MessageReceivedEvent;
+import com.calclab.emite.core.client.events.PresenceReceivedEvent;
+import com.calclab.emite.core.client.packet.IPacket;
+import com.calclab.emite.core.client.xmpp.session.Credentials;
+import com.calclab.emite.core.client.xmpp.session.IQResponseHandler;
+import com.calclab.emite.core.client.xmpp.session.SessionStates;
+import com.calclab.emite.core.client.xmpp.session.XmppSessionBoilerPlate;
+import com.calclab.emite.core.client.xmpp.stanzas.IQ;
+import com.calclab.emite.core.client.xmpp.stanzas.IQ.Type;
+import com.calclab.emite.core.client.xmpp.stanzas.Message;
+import com.calclab.emite.core.client.xmpp.stanzas.Presence;
+import com.calclab.emite.core.client.xmpp.stanzas.XmppURI;
 import com.calclab.emite.xtesting.matchers.EmiteAsserts;
 import com.calclab.emite.xtesting.matchers.IsPacketLike;
-import com.google.web.bindery.event.shared.EventBus;
-import com.google.web.bindery.event.shared.SimpleEventBus;
+import com.calclab.emite.xtesting.services.TigaseXMLService;
 
-public class XmppSessionTester extends XmppSessionImpl {
+public class XmppSessionTester extends XmppSessionBoilerPlate {
 
-	private EventBus eventBus = new SimpleEventBus();
-	private XmppConnection connection = new XmppConnectionTester();
-	
 	private XmppURI currentUser;
-	private final List<Stanza> sent;
-	private IQ lastIQSent;
-	private IQCallback lastIQResponseHandler;
+	private final TigaseXMLService xmler;
+	private final ArrayList<IPacket> sent;
+	private IPacket lastIQSent;
+	private IQResponseHandler lastIQResponseHandler;
 
 	public XmppSessionTester() {
 		this((XmppURI) null);
@@ -83,19 +74,24 @@ public class XmppSessionTester extends XmppSessionImpl {
 	 *            optional user to login
 	 */
 	public XmppSessionTester(final XmppURI user) {
-		super(eventBus, connection, new SASLManager(eventBus, connection));
-		sent = new ArrayList<Stanza>();
+		super(EmiteTestsEventBus.create("et"));
+		xmler = new TigaseXMLService();
+		sent = new ArrayList<IPacket>();
 		if (user != null) {
 			setLoggedIn(user);
 		}
 	}
 
-	public void answerSuccess(final IQ iq) {
-		lastIQResponseHandler.onIQSuccess(iq);
+	public void answer(final IPacket iq) {
+		lastIQResponseHandler.onIQ(new IQ(iq));
 	}
 
-	public void answerFailure(final IQ iq) {
-		lastIQResponseHandler.onIQFailure(iq);
+	public void answer(final String iq) {
+		answer(xmler.toXML(iq));
+	}
+
+	public void answerSuccess() {
+		answer(new IQ(Type.result));
 	}
 
 	@Override
@@ -108,22 +104,17 @@ public class XmppSessionTester extends XmppSessionImpl {
 		return currentUser != null;
 	}
 
-	@Deprecated
-	public void login(final XmppURI user, final String password) {
-		login(new Credentials(user, password));
-	}
-	
 	@Override
 	public void login(final Credentials credentials) {
-		setLoggedIn(credentials.getUri());
+		setLoggedIn(credentials.getXmppUri());
 	}
 
 	@Override
 	public void logout() {
 		if (currentUser != null) {
-			setStatus(SessionStatus.loggingOut);
+			setSessionState(SessionStates.loggingOut);
 			currentUser = null;
-			setStatus(SessionStatus.disconnected);
+			setSessionState(SessionStates.disconnected);
 		}
 	}
 
@@ -141,8 +132,8 @@ public class XmppSessionTester extends XmppSessionImpl {
 	}
 
 	public void receives(final String received) {
-		final XMLPacket stanza = XMLBuilder.fromXML(received);
-		final String name = stanza.getTagName();
+		final IPacket stanza = xmler.toXML(received);
+		final String name = stanza.getName();
 		if (name.equals("message")) {
 			eventBus.fireEvent(new MessageReceivedEvent(new Message(stanza)));
 		} else if (name.equals("presence")) {
@@ -159,12 +150,12 @@ public class XmppSessionTester extends XmppSessionImpl {
 	}
 
 	@Override
-	public void send(final Stanza packet) {
+	public void send(final IPacket packet) {
 		sent.add(packet);
 	}
 
 	@Override
-	public void sendIQ(final String category, final IQ iq, final IQCallback iqHandler) {
+	public void sendIQ(final String category, final IQ iq, final IQResponseHandler iqHandler) {
 		lastIQSent = iq;
 		lastIQResponseHandler = iqHandler;
 	}
@@ -179,59 +170,65 @@ public class XmppSessionTester extends XmppSessionImpl {
 
 	public void setLoggedIn(final XmppURI userURI) {
 		currentUser = userURI;
-		setStatus(SessionStatus.loggedIn);
+		setSessionState(SessionStates.loggedIn);
 	}
 
 	public void setReady() {
-		setStatus(SessionStatus.ready);
+		setSessionState(SessionStates.ready);
 	}
 
-	public IQCallback verifyIQSent(final IQ iq) {
+	@Override
+	public void setSessionState(final String state) {
+		super.setSessionState(state);
+	}
+
+	public IQResponseHandler verifyIQSent(final IPacket iq) {
 		assertNotNull(lastIQSent);
 		EmiteAsserts.assertPacketLike(iq, lastIQSent);
 		return lastIQResponseHandler;
 	}
 
 	public void verifyIQSent(final String xml) {
-		verifyIQSent(new IQ(XMLBuilder.fromXML(xml)));
+		verifyIQSent(xmler.toXML(xml));
 	}
 
-	public void verifyNotSent(final XMLPacket packet) {
+	public void verifyNotSent(final IPacket packet) {
 		assertNotContains(packet, sent);
 	}
 
 	public void verifyNotSent(final String xml) {
-		verifyNotSent(XMLBuilder.fromXML(xml));
+		verifyNotSent(xmler.toXML(xml));
 	}
 
-	public void verifySent(final XMLPacket packet) {
+	public void verifySent(final IPacket packet) {
 		assertContains(packet, sent);
 	}
 
 	public void verifySent(final String expected) {
-		verifySent(XMLBuilder.fromXML(expected));
+		final IPacket packet = xmler.toXML(expected);
+		verifySent(packet);
 	}
 
 	public void verifySentNothing() {
 		assertEquals("number of sent stanzas", 0, sent.size());
 	}
 
-	private void assertContains(final HasXML expected, final List<? extends HasXML> list) {
-		final StringBuilder buffer = new StringBuilder();
+	private void assertContains(final IPacket expected, final ArrayList<IPacket> list) {
+		final StringBuffer buffer = new StringBuffer();
 		final boolean isContained = contains(expected, list, buffer);
 		assertTrue("Expected " + expected + " contained in " + buffer, isContained);
 	}
 
-	private void assertNotContains(final HasXML expected, final List<? extends HasXML> list) {
-		final StringBuilder buffer = new StringBuilder();
+	private void assertNotContains(final IPacket expected, final ArrayList<IPacket> list) {
+		final StringBuffer buffer = new StringBuffer();
 		final boolean isContained = contains(expected, list, buffer);
 		assertFalse("Expected " + expected + " contained in\n" + buffer, isContained);
 	}
 
-	private boolean contains(final HasXML expected, final List<? extends HasXML> list, final StringBuilder buffer) {
+	private boolean contains(final IPacket expected, final ArrayList<IPacket> list, final StringBuffer buffer) {
 		boolean isContained = false;
 		final IsPacketLike matcher = new IsPacketLike(expected);
-		for (final HasXML packet : list) {
+		for (final IPacket packet : list) {
 			buffer.append("[").append(packet.toString()).append("]");
 			isContained = isContained ? isContained : matcher.matches(packet, System.out);
 		}

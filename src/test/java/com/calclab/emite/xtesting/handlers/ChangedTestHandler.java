@@ -20,11 +20,10 @@
 
 package com.calclab.emite.xtesting.handlers;
 
-import com.calclab.emite.core.events.ChangedEvent;
-import com.calclab.emite.core.events.ChangedEvent.ChangeType;
+import com.calclab.emite.core.client.events.ChangedEvent;
 
 public abstract class ChangedTestHandler<T extends ChangedEvent<?>> extends TestHandler<T> {
-	public ChangeType getLastChangeType() {
+	public String getLastChangeType() {
 		return hasEvent() ? getLastEvent().getChangeType() : null;
 	}
 

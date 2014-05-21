@@ -32,7 +32,7 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.util.EntityUtils;
 
-import com.calclab.emite.base.util.ConnectorCallback;
+import com.calclab.emite.core.client.services.ConnectorCallback;
 
 public class HttpConnector {
 
@@ -45,7 +45,7 @@ public class HttpConnector {
 		}
 
 	}
-	
+
 	private final ExecutorService sendService;
 	private final ExecutorService receiveService;
 
@@ -55,6 +55,7 @@ public class HttpConnector {
 	}
 
 	public synchronized void send(final String httpBase, final String xml, final ConnectorCallback callback) {
+
 		sendService.execute(createSendAction(httpBase, xml, callback));
 	}
 
@@ -73,7 +74,7 @@ public class HttpConnector {
 					callback.onResponseReceived(status, response, xml);
 				} else {
 					debug("Connector [{0}] bad status: {1}", id, status);
-					callback.onResponseError(xml, new Exception("bad http status " + status));
+					callback.onError(xml, new Exception("bad http status " + status));
 				}
 
 			}
@@ -99,7 +100,7 @@ public class HttpConnector {
 					final HttpResponse response = client.execute(post);
 					responseString = EntityUtils.toString(response.getEntity());
 				} catch (final Exception e) {
-					callback.onResponseError(xml, e);
+					callback.onError(xml, e);
 					e.printStackTrace();
 				}
 
@@ -110,7 +111,7 @@ public class HttpConnector {
 					responseString = EntityUtils.toString(response.getEntity());
 					status = response.getStatusLine().getStatusCode();
 				} catch (final Exception e) {
-					callback.onResponseError(xml, e);
+					callback.onError(xml, e);
 					e.printStackTrace();
 				}
 

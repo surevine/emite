@@ -20,9 +20,10 @@
 
 package com.calclab.emite.xtesting.handlers;
 
-import com.calclab.emite.xep.muc.events.OccupantChangedEvent;
+import com.calclab.emite.xep.muc.client.events.OccupantChangedEvent;
+import com.calclab.emite.xep.muc.client.events.OccupantChangedHandler;
 
-public class OccupantChangedTestHandler extends TestHandler<OccupantChangedEvent> implements OccupantChangedEvent.Handler {
+public class OccupantChangedTestHandler extends TestHandler<OccupantChangedEvent> implements OccupantChangedHandler {
 
 	private final String type;
 
