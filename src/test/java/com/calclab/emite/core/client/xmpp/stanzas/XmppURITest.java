@@ -126,10 +126,10 @@ public class XmppURITest {
 
 	@Test
 	public void shouldIgnoreLetterCaseExceptInResource() {
-		final XmppURI uri1 = XmppURI.uri("NODE", "HOST", "RESOURCE");
+		final XmppURI uri1 = XmppURI.uri_or_null("NODE", "HOST", "RESOURCE");
 		final XmppURI uri2 = XmppURI.uri("NODE@HOST/RESOURCE");
-		final XmppURI uri3 = XmppURI.uri("node", "host", "RESOURCE");
-		final XmppURI uri4 = XmppURI.uri("NODE", "HOST", "resource");
+		final XmppURI uri3 = XmppURI.uri_or_null("node", "host", "RESOURCE");
+		final XmppURI uri4 = XmppURI.uri_or_null("NODE", "HOST", "resource");
 
 		assertEquals(uri1, uri1);
 		assertEquals(uri1, uri2);

@@ -76,7 +76,7 @@ public class RoomChatManager extends AbstractChatManager implements RoomManager 
 	@Override
 	public Room acceptRoomInvitation(final RoomInvitation invitation) {
 		final XmppURI roomURI = invitation.getRoomURI();
-		final XmppURI uri = XmppURI.uri(roomURI.getNode(), roomURI.getHost(), session.getCurrentUserURI().getNode());
+		final XmppURI uri = XmppURI.uri_or_null(roomURI.getNode(), roomURI.getHost(), session.getCurrentUserURI().getNode());
 
 		final ChatProperties properties = new ChatProperties(uri, invitation.getChatProperties());
 

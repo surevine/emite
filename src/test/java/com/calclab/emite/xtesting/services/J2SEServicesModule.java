@@ -70,4 +70,9 @@ public class J2SEServicesModule implements Services {
 		return xmler.toXML(xml);
 	}
 
+	@Override
+	public void send(String httpBase, String request, ConnectorCallback listener, int timeoutMillis) throws ConnectorException {
+		send(httpBase, request, listener);
+	}
+
 }

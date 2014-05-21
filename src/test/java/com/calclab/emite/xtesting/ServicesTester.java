@@ -38,11 +38,13 @@ public class ServicesTester implements Services {
 		public final String httpBase;
 		public final String request;
 		public final ConnectorCallback listener;
+		public final int timeoutMillis;
 
-		public Request(final String httpBase, final String request, final ConnectorCallback listener) {
+		public Request(final String httpBase, final String request, final ConnectorCallback listener, final int timeoutMillis) {
 			this.httpBase = httpBase;
 			this.request = request;
 			this.listener = listener;
+			this.timeoutMillis = timeoutMillis;
 		}
 
 	}
@@ -63,6 +65,10 @@ public class ServicesTester implements Services {
 		final String request = requests.get(index).request;
 		return xmler.toXML(request);
 	}
+	
+	public Request getLastRequest() {
+		return requests.get(requests.size() - 1);
+	}
 
 	public int requestSentCount() {
 		return requests.size();
@@ -74,7 +80,7 @@ public class ServicesTester implements Services {
 
 	@Override
 	public void send(final String httpBase, final String request, final ConnectorCallback listener) throws ConnectorException {
-		requests.add(new Request(httpBase, request, listener));
+		requests.add(new Request(httpBase, request, listener, -1));
 	}
 
 	@Override
@@ -85,6 +91,11 @@ public class ServicesTester implements Services {
 	@Override
 	public IPacket toXML(final String xml) {
 		return xmler.toXML(xml);
+	}
+
+	@Override
+	public void send(String httpBase, String request, ConnectorCallback listener, int timeoutMillis) throws ConnectorException {
+		requests.add(new Request(httpBase, request, listener, timeoutMillis));
 	}
 
 }

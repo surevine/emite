@@ -23,11 +23,31 @@ package com.calclab.emite.core.client.services;
 import com.calclab.emite.core.client.packet.IPacket;
 
 public interface Services {
+	public static final int DEFAULT_TIMEOUT_MILLIS = 300000;
+	
 	long getCurrentTime();
 
 	void schedule(int msecs, ScheduledAction action);
 
+	/**
+	 * Sends an http request.
+	 * <p>Note: the default timeout is 5 minutes
+	 * @param httpBase
+	 * @param request
+	 * @param listener
+	 * @throws ConnectorException
+	 */
 	void send(String httpBase, String request, ConnectorCallback listener) throws ConnectorException;
+
+	/**
+	 * Sends an HTTP request.
+	 * @param httpBase
+	 * @param request
+	 * @param listener
+	 * @param timeoutMillis
+	 * @throws ConnectorException
+	 */
+	void send(String httpBase, String request, ConnectorCallback listener, int timeoutMillis) throws ConnectorException;
 
 	String toString(IPacket iPacket);
 

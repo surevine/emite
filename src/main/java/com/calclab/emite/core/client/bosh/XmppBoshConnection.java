@@ -20,7 +20,9 @@
 
 package com.calclab.emite.core.client.bosh;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.calclab.emite.core.client.conn.ConnectionSettings;
@@ -31,9 +33,9 @@ import com.calclab.emite.core.client.events.EmiteEventBus;
 import com.calclab.emite.core.client.packet.IPacket;
 import com.calclab.emite.core.client.packet.Packet;
 import com.calclab.emite.core.client.services.ConnectorCallback;
-import com.calclab.emite.core.client.services.ConnectorException;
 import com.calclab.emite.core.client.services.ScheduledAction;
 import com.calclab.emite.core.client.services.Services;
+import com.google.gwt.core.client.GWT;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
@@ -45,73 +47,175 @@ import com.google.inject.Singleton;
 @Singleton
 public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	
+	/** 
+	 * Simple service to call {@link XmppBoshConnection#continueConnection()} once every so often as the connector
+	 * occasionally seems to be able to get into a state where there are no open connections (and if there are no
+	 * connections then there are no responses to trigger more connections and the client just hangs)
+	 */
+	class Heartbeat implements ScheduledAction {
+		private final XmppBoshConnection connection;
+		private final int checkMillis;
+		
+		/**
+		 * @param connection the BOSH connector
+		 * @param checkMillis the number of milliseconds to keep checking for open connections
+		 */
+		Heartbeat(XmppBoshConnection connection, int checkMillis) {
+			this.connection = connection;
+			this.checkMillis = checkMillis;
+			run();
+		}
+		
+		@Override
+		public void run() {
+			try {
+				// If the connection has errors then the normal retry code will be periodically trying the connection
+				if(connection.isActive() && !connection.hasErrors()) {
+					// We can safely call this as continueConnection() won't do anything if it doesn't need to
+					connection.continueConnection();
+				}
+			} finally {
+				connection.services.schedule(this.checkMillis, this);
+			}
+		}
+	}
+	
+	/**
+	 * How many milliseconds between retries when a potentially recoverable error is detected
+	 */
+	private static final int ERROR_RETRY_PERIOD_MILLIS = 2000;
+	
+	/**
+	 * How many seconds to timeout the connection retry on an error if we don't have a
+	 * wait period defined (e.g. on initial connection attempt)
+	 */
+	private static final int DEFAULT_ERROR_RETRY_TIMEOUT_MILLIS = 60000;
+	
+	/**
+	 * How many seconds to add to the inactivity period for the connection timeout. Essentially
+	 * if we haven't had a reply from the server after inactivity + this value then the connection
+	 * will time out.
+	 */
+	private static final int DEFAULT_CONNECTION_TIMEOUT_MILLIS = 120000; // 2 minutes
+	
+	/**
+	 * How many milliseconds between calls to continueConnection.<br />
+	 * Set to zero to disable
+	 * 
+	 * @see Heartbeat
+	 */
+	private static final int HEARTBEAT_PERIOD_MILLIS = 5000;
+	
 	private static final Logger logger = Logger.getLogger(XmppBoshConnection.class.getName());
 	
 	private int activeConnections;
 	private final Services services;
 	private final ConnectorCallback listener;
 	private boolean shouldCollectResponses;
-	private final RetryControl retryControl = new RetryControl();
+	
+	/**
+	 * Maintains a set of requests which encountered errors and are currently being
+	 * retried. The class should not send any new requests if this set is non-empty
+	 */
+	private final HashSet<String> erroredRequests;
 
+	private int clientTimeout = 5000;
+	
 	@Inject
 	public XmppBoshConnection(final EmiteEventBus eventBus, final Services services) {
 		super(eventBus);
 		this.services = services;
+		
+		erroredRequests = new HashSet<String>();
 
+		if(HEARTBEAT_PERIOD_MILLIS > 0) {
+			new Heartbeat(this, HEARTBEAT_PERIOD_MILLIS);
+		}
+		
 		listener = new ConnectorCallback() {
 
 			@Override
 			public void onError(final String request, final Throwable throwable) {
 				if (isActive()) {
 					final int e = incrementErrors();
-					logger.severe("Connection error #" + e + ": " + throwable.getMessage());
-					if (e > retryControl.maxRetries) {
+					logger.log(Level.WARNING, "Connection error #" + e, throwable);
+					
+					erroredRequests.add(request);
+					
+					final String sid = getStreamSettings().sid;
+					
+					/* 
+					 * TODO If there are multiple retrying connections at once then the error count will be
+					 * artificially increased so we should handle that properly.
+					 */
+					// If we've been errored for longer than the "inactivity" time then there is no
+					// way we can get the session back, so we may as well just give up!
+					if((e * ERROR_RETRY_PERIOD_MILLIS) > getErrorTimeoutMillis()) {
+						--activeConnections;
+						logger.severe("Connection errored for longer than inactivity timeout ("
+								+ getStreamSettings().getInactivity() + "s) - Notifying connection error");
 						fireError("Connection error: " + throwable.toString());
 						disconnect();
-					} else {
-						final int scedTime = retryControl.retry(e);
-						fireRetry(e, scedTime);
-						services.schedule(scedTime, new ScheduledAction() {
+					} else {;
+						logger.fine("Retrying connection...");
+						fireRetry(e, ERROR_RETRY_PERIOD_MILLIS);
+						services.schedule(ERROR_RETRY_PERIOD_MILLIS, new ScheduledAction() {
 							@Override
 							public void run() {
-								logger.info("Error retry: " + e);
-								send(request);
+								// If the session hasn't been changed in the meantime...
+								if((getStreamSettings().sid == null) || getStreamSettings().sid.equals(sid)) {
+									logger.info("Error retry: " + e);
+									--activeConnections;
+									send(request);
+								}
 							}
 						});
+						logger.fine("Retry queued for " + ERROR_RETRY_PERIOD_MILLIS + "ms");
 					}
 				}
 			}
 
 			@Override
 			public void onResponseReceived(final int statusCode, final String content, final String originalRequest) {
-				clearErrors();
-				activeConnections--;
 				if (isActive()) {
-					// TODO: check if is the same code in other than FF and make
 					// tests
 					if (statusCode == 404) {
+						// We will get a 404 if the session has timed out - not much we can do here unfortunately
+						activeConnections--;
 						fireError("404 Connection Error (session removed ?!) : " + content);
 						disconnect();
 					} else if (statusCode != 200 && statusCode != 0) {
-						// setActive(false);
-						// fireError("Bad status: " + statusCode);
 						onError(originalRequest, new Exception("Bad status: " + statusCode + " " + content));
 					} else {
+						GWT.log("++ Inbound content from request, " + content.length() + " bytes.");
 						final IPacket response = services.toXML(content);
 						if (response != null && "body".equals(response.getName())) {
-							clearErrors();
+							activeConnections--;
+							/* 
+							 * We could just call remove directly here, but by doing a separate contains check
+							 * we can log the fact that an error has recovered, and still will only be checking
+							 * the set once in the 99% no error situation
+							 */
+							if(erroredRequests.contains(originalRequest)) {
+								logger.finer("Successfully resent errored connection on session " + getStreamSettings().sid);
+								erroredRequests.remove(originalRequest);
+							}
 							fireResponse(content);
 							handleResponse(response);
 						} else {
+							if (response == null) {
+								GWT.log("Erk; response is null, maybe it's not XML?");
+							} else {
+								GWT.log("Response root node is " + response.getName());
+							}
 							onError(originalRequest, new Exception("Bad response: " + statusCode + " " + content));
-							// fireError("Bad response: " + content);
 						}
 					}
 				}
 			}
 		};
 	}
-
+	
 	@Override
 	public void connect() {
 		assert getConnectionSettings() != null : "You should set user settings before connect!";
@@ -169,7 +273,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	public boolean resume(final StreamSettings settings) {
 		setActive(true);
 		setStream(settings);
-		continueConnection(null);
+		continueConnection();
 		return isActive();
 	}
 
@@ -198,7 +302,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	 * @see http://xmpp.org/extensions/xep-0124.html#inactive
 	 * @param ack
 	 */
-	private void continueConnection(final String ack) {
+	private void continueConnection() {
 		if (isConnected() && activeConnections == 0) {
 			if (getCurrentBody() != null) {
 				sendBody();
@@ -208,7 +312,7 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 				services.schedule(waitTime, new ScheduledAction() {
 					@Override
 					public void run() {
-						if (getCurrentBody() == null && getStreamSettings().rid == currentRID) {
+						if (getCurrentBody() == null && getStreamSettings().rid == currentRID && activeConnections == 0 && !hasErrors()) {
 							createBodyIfNeeded();
 							// Whitespace keep-alive
 							// getCurrentBody().setText(" ");
@@ -266,24 +370,33 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 			setActive(false);
 			fireDisconnected("disconnected by server");
 		} else {
-			if (getStreamSettings().sid == null) {
-				initStream(response);
-				fireConnected();
+			try {
+				if (getStreamSettings().sid == null) {
+					initStream(response);
+					fireConnected();
+				}
+				shouldCollectResponses = true;
+				final List<? extends IPacket> stanzas = response.getChildren();
+				GWT.log("** Processing " + stanzas.size() + " stanzas");
+				for (final IPacket stanza : stanzas) {
+					try {
+						//GWT.log("I got a packet: " + stanza.getName() + " " + stanza.getAttribute("xmlns"));
+						fireStanzaReceived(stanza);
+					} catch(Exception e) {
+						logger.log(Level.WARNING, "Error occurred while processing received stanza: " + stanza.toString(), e);
+					}
+				}
+			} finally {
+				shouldCollectResponses = false;
+				continueConnection();
 			}
-			shouldCollectResponses = true;
-			final List<? extends IPacket> stanzas = response.getChildren();
-			for (final IPacket stanza : stanzas) {
-				fireStanzaReceived(stanza);
-			}
-			shouldCollectResponses = false;
-			continueConnection(response.getAttribute("ack"));
 		}
 	}
 
 	private void initStream(final IPacket response) {
 		final StreamSettings stream = getStreamSettings();
 		stream.sid = response.getAttribute("sid");
-		stream.wait = response.getAttribute("wait");
+		stream.setWait(response.getAttribute("wait"));
 		stream.setInactivity(response.getAttribute("inactivity"));
 		stream.setMaxPause(response.getAttribute("maxpause"));
 	}
@@ -301,12 +414,15 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 	private void send(final String request) {
 		try {
 			activeConnections++;
-			services.send(getConnectionSettings().httpBase, request, listener);
-			getStreamSettings().lastRequestTime = services.getCurrentTime();
-		} catch (final ConnectorException e) {
+			
+			GWT.log("Timeout: " + getConnectionTimeoutMillis());
+			
+			services.send(getConnectionSettings().httpBase, request, listener, getConnectionTimeoutMillis());
+		} catch (final Exception e) {
 			activeConnections--;
-			e.printStackTrace();
+			logger.log(Level.SEVERE, "Exception occurred on send", e);
 		}
+		getStreamSettings().lastRequestTime = services.getCurrentTime();
 	}
 
 	private void sendBody() {
@@ -323,5 +439,58 @@ public class XmppBoshConnection extends XmppConnectionBoilerPlate {
 			logger.finer("Send body simply queued");
 		}
 	}
+	
+	@Override
+	public boolean hasErrors() {
+		return !erroredRequests.isEmpty();
+	}
 
+	@Override
+	public void clearErrors() {
+		super.clearErrors();
+		
+		this.erroredRequests.clear();
+	}
+	
+	/**
+	 * Returns the number of milliseconds after which an errored connection should be dropped. This
+	 * is normally the inactivity period defined by the server, but may default to {@link #DEFAULT_ERROR_RETRY_TIMEOUT_MILLIS}
+	 * if the connection has not yet been established
+	 * 
+	 * @return number of milliseconds.
+	 */
+	private int getErrorTimeoutMillis() {
+		if((getStreamSettings() != null) && (getStreamSettings().getInactivity() > 0)) {
+			return getStreamSettings().getInactivity() * 1000;
+		}
+		
+		return DEFAULT_ERROR_RETRY_TIMEOUT_MILLIS;
+	}
+	
+	/**
+	 * Returns the number of seconds to time out any http requests to the server. This is
+	 * normally the "wait" time plus half the "inactivity" time, but may default to
+	 * {@link #DEFAULT_CONNECTION_TIMEOUT_MILLIS} if the connection has not yet been
+	 * established.
+	 * 
+	 * @return number of milliseconds.
+	 */
+	private int getConnectionTimeoutMillis() {
+		if((getStreamSettings() != null)
+				&& (getStreamSettings().getWait() > 0)) {
+			return ( getStreamSettings().getWait() * 1000 + clientTimeout );
+		}
+		
+		return DEFAULT_CONNECTION_TIMEOUT_MILLIS;
+	}
+
+	/**
+	 * Sets the clientTimeout fudge factor. This will be added to the "wait"
+	 * time and used as the timeout value for http connections.
+	 * 
+	 * @param clientTimeout the timeout period in milliseconds
+	 */
+	public void setClientTimeout(int clientTimeout) {
+		this.clientTimeout = clientTimeout;
+	}
 }

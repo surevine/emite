@@ -72,6 +72,10 @@ public class GWTPacket extends AbstractPacket {
 		final NamedNodeMap attributes = element.getAttributes();
 		for (int index = 0; index < attributes.getLength(); index++) {
 			final Node attrib = attributes.item(index);
+			if(attrib == null) {
+				continue;
+			}
+			
 			map.put(attrib.getNodeName(), attrib.getNodeValue());
 		}
 		return map;
@@ -82,6 +86,10 @@ public class GWTPacket extends AbstractPacket {
 		final NamedNodeMap original = element.getAttributes();
 		for (int index = 0; index < original.getLength(); index++) {
 			final Node node = original.item(index);
+			if(node == null) {
+				continue;
+			}
+			
 			attributes.put(node.getNodeName(), node.getNodeValue());
 		}
 		return attributes;

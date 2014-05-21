@@ -25,6 +25,7 @@ import static com.calclab.emite.core.client.xmpp.stanzas.XmppURI.uri;
 import java.util.logging.Logger;
 
 import com.calclab.emite.core.client.bosh.StreamSettings;
+import com.calclab.emite.core.client.bosh.XmppBoshConnection;
 import com.calclab.emite.core.client.conn.ConnectionSettings;
 import com.calclab.emite.core.client.conn.XmppConnection;
 import com.calclab.emite.core.client.xmpp.session.Credentials;
@@ -94,6 +95,12 @@ public class PageAssist {
 	 */
 	static final String PARAM_BOSH_HOLD = "emite.bosh.hold";
 
+	/**
+	 * Meta key to store the client timeout value in ms
+	 * (the actual timeout will be the "wait" time plus this value)
+	 */
+	static final String PARAM_BOSH_CLIENT_TIMEOUT = "emite.bosh.clientTimeout";
+
 	private static final String PAUSE_COOKIE = "emite.cookies.pause";
 
 	public static void closeSession(final XmppSession session) {
@@ -123,6 +130,17 @@ public class PageAssist {
 		if (host != null && httpBase != null) {
 			logger.info("CONNECTION PARAMS: " + httpBase + ", " + host);
 			connection.setSettings(new ConnectionSettings(httpBase, host, wait, hold, routeHost, routePort, secure));
+			
+			if(connection instanceof XmppBoshConnection) {
+				XmppBoshConnection boshConnection = (XmppBoshConnection) connection;
+				
+				Integer clientTimeout = getMetaInteger(PARAM_BOSH_CLIENT_TIMEOUT);
+				
+				if(clientTimeout != null) {
+					logger.info("CLIENT TIMEOUT: " + clientTimeout + "ms");
+					boshConnection.setClientTimeout(clientTimeout);
+				}
+			}
 			return true;
 		} else {
 			return false;
@@ -266,7 +284,7 @@ public class PageAssist {
 		final SerializableMap map = new SerializableMap();
 		map.put("rid", "" + stream.rid);
 		map.put("sid", stream.sid);
-		map.put("wait", stream.wait);
+		map.put("wait", String.valueOf(stream.getWait()));
 		map.put("inactivity", stream.getInactivityString());
 		map.put("maxPause", stream.getMaxPauseString());
 		map.put("user", user);
@@ -297,7 +315,7 @@ public class PageAssist {
 		final StreamSettings stream = new StreamSettings();
 		stream.rid = Integer.parseInt(map.get("rid"));
 		stream.sid = map.get("sid");
-		stream.wait = map.get("wait");
+		stream.setWait(map.get("wait"));
 		stream.setInactivity(map.get("inactivity"));
 		stream.setMaxPause(map.get("maxPause"));
 		final XmppURI user = uri(map.get("user"));

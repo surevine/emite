@@ -39,6 +39,7 @@ public abstract class ChangedEvent<T extends EventHandler> extends GwtEvent<T> {
 		public static final String removed = "removed";
 		public static final String added = "added";
 		public static final String modified = "modified";
+		public static final String closing = "closing";
 		public static final String closed = "closed";
 		public static final String created = "created";
 		public static final String opened = "opened";

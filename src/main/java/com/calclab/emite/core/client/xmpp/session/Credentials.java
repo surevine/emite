@@ -35,7 +35,7 @@ public class Credentials {
 	/**
 	 * The URI required to perform an anonymous login
 	 */
-	public static final XmppURI ANONYMOUS = XmppURI.uri("anonymous", "", null);
+	public static final XmppURI ANONYMOUS = XmppURI.uri_or_null("anonymous", "arpa", null);
 
 	public static Credentials createAnonymous() {
 		return new Credentials(ANONYMOUS, null, ENCODING_NONE);
@@ -51,7 +51,7 @@ public class Credentials {
 			throw new NullPointerException("uri can't be null in LoginCredentials");
 
 		if (uri.getResource() == null) {
-			this.uri = XmppURI.uri(uri.getNode(), uri.getHost(), "emite-" + System.currentTimeMillis());
+			this.uri = XmppURI.uri_or_null(uri.getNode(), uri.getHost(), "emite-" + System.currentTimeMillis());
 		} else {
 			this.uri = uri;
 		}

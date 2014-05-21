@@ -35,6 +35,7 @@ import com.calclab.emite.core.client.events.IQReceivedEvent;
 import com.calclab.emite.core.client.events.MessageReceivedEvent;
 import com.calclab.emite.core.client.events.PresenceReceivedEvent;
 import com.calclab.emite.core.client.packet.IPacket;
+import com.calclab.emite.core.client.packet.MatcherFactory;
 import com.calclab.emite.core.client.xmpp.resource.ResourceBindResultEvent;
 import com.calclab.emite.core.client.xmpp.resource.ResourceBindResultHandler;
 import com.calclab.emite.core.client.xmpp.resource.ResourceBindingManager;
@@ -93,7 +94,7 @@ public class XmppSessionLogic extends XmppSessionBoilerPlate {
 		    }
 		} else if (credentials != null && ("stream:features".equals(name)||"features".equals(name)) && stanza.hasChild("mechanisms")) {
 		    setSessionState(SessionStates.connecting);
-		    saslManager.sendAuthorizationRequest(credentials);
+		    saslManager.sendAuthorizationRequest(credentials, stanza.getChildren(MatcherFactory.byNameAndXMLNS("mechanisms", "urn:ietf:params:xml:ns:xmpp-sasl")).get(0));
 		    credentials = null;
 		}
 	    }
@@ -201,8 +202,7 @@ public class XmppSessionLogic extends XmppSessionBoilerPlate {
 
 	@Override
 	public void send(final IPacket packet) {
-		// Added a condition to check the connection is not retrying...
-		if (connection.hasErrors() || userUri == null) {
+		if (userUri == null) {
 			logger.finer("session queuing stanza" + packet);
 			queuedStanzas.add(packet);
 		} else {

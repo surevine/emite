@@ -20,10 +20,14 @@
 
 package com.calclab.emite.xep.muc.client;
 
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import com.calclab.emite.core.client.events.ChangedEvent.ChangeTypes;
 import com.calclab.emite.core.client.events.ErrorEvent;
+import com.calclab.emite.core.client.events.MessageEvent;
+import com.calclab.emite.core.client.events.MessageHandler;
 import com.calclab.emite.core.client.events.PresenceEvent;
 import com.calclab.emite.core.client.events.PresenceHandler;
 import com.calclab.emite.core.client.packet.IPacket;
@@ -42,6 +46,8 @@ import com.calclab.emite.core.client.xmpp.stanzas.XmppURI;
 import com.calclab.emite.im.client.chat.ChatErrors;
 import com.calclab.emite.im.client.chat.ChatProperties;
 import com.calclab.emite.im.client.chat.ChatStates;
+import com.calclab.emite.xep.delay.client.Delay;
+import com.calclab.emite.xep.delay.client.DelayHelper;
 import com.calclab.emite.xep.muc.client.events.BeforeRoomInvitationSendEvent;
 import com.calclab.emite.xep.muc.client.events.OccupantChangedEvent;
 import com.calclab.emite.xep.muc.client.events.RoomInvitationSentEvent;
@@ -54,6 +60,8 @@ import com.calclab.emite.xep.muc.client.events.RoomInvitationSentEvent;
 public class RoomChat extends RoomBoilerplate {
 	protected static final PacketMatcher ROOM_CREATED = MatcherFactory.byNameAndXMLNS("x", "http://jabber.org/protocol/muc#user");
 
+	private Date lastMessageReceived;
+	
 	/**
 	 * Create a new room with the given properties. Room are created by
 	 * RoomManagers
@@ -66,6 +74,27 @@ public class RoomChat extends RoomBoilerplate {
 	RoomChat(final XmppSession session, final ChatProperties properties) {
 		super(session, properties);
 		setChatState(ChatStates.locked);
+		
+		lastMessageReceived = null;
+		
+		addMessageReceivedHandler(new MessageHandler() {
+			
+			@Override
+			public void onMessage(MessageEvent event) {
+				if(event.getMessage().getFrom().hasResource()) {
+					final Delay delay = DelayHelper.getDelay(event.getMessage());
+					
+					if(delay != null) {
+						if((lastMessageReceived != null) && delay.getStamp().before(lastMessageReceived)) {
+							return;
+						}
+						lastMessageReceived = delay.getStamp();
+					} else {
+						lastMessageReceived = new Date();
+					}					
+				}
+			}
+		});
 
 		trackRoomPresence();
 	}
@@ -77,9 +106,19 @@ public class RoomChat extends RoomBoilerplate {
 	 */
 	@Override
 	public void close() {
-		if (ChatStates.ready.equals(properties.getState())) {
-			session.send(new Presence(Type.unavailable, null, getURI()));
-			properties.setState(ChatStates.locked);
+		if (ChatStates.ready.equals(getChatState())) {
+			if(session.isReady()) {
+				session.send(new Presence(Type.unavailable, null, getURI()));
+			}
+			
+			// Remove all the occupants
+			final ArrayList<Occupant> occupants = new ArrayList<Occupant>(getOccupants());
+			
+			for(Occupant occupant : occupants) {
+				removeOccupant(occupant.getOccupantUri());
+			}
+			
+			super.close();
 		}
 	}
 
@@ -127,7 +166,15 @@ public class RoomChat extends RoomBoilerplate {
 	 */
 	@Override
 	public void open() {
-		final HistoryOptions historyOptions = (HistoryOptions) properties.getData(HistoryOptions.KEY);
+		HistoryOptions historyOptions = (HistoryOptions) properties.getData(HistoryOptions.KEY);
+		
+		if(lastMessageReceived != null) {
+			if(historyOptions == null) {
+				historyOptions = new HistoryOptions();
+			}
+			historyOptions.since = lastMessageReceived;
+		}
+		
 		session.send(createEnterPresence(historyOptions));
 	}
 
@@ -161,7 +208,7 @@ public class RoomChat extends RoomBoilerplate {
 
 	@Override
 	public void sendPrivateMessage(final Message message, final String nick) {
-		message.setTo(XmppURI.uri(getURI().getNode(), getURI().getHost(), nick));
+		message.setTo(XmppURI.uri_or_null(getURI().getNode(), getURI().getHost(), nick));
 		message.setType(Message.Type.chat);
 		super.send(message);
 	}
@@ -183,6 +230,9 @@ public class RoomChat extends RoomBoilerplate {
 		invite.setAttribute("to", userJid.toString());
 		final IPacket reason = invite.addChild("reason", null);
 		reason.setText(reasonText);
+		
+		message.setTextToChild("body", reasonText);	// Server won't store the invitation offline unless it has a body
+		
 		chatEventBus.fireEvent(new BeforeRoomInvitationSendEvent(message, invite));
 		session.send(message);
 		chatEventBus.fireEvent(new RoomInvitationSentEvent(userJid, reasonText));

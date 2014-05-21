@@ -113,7 +113,7 @@ public class PairChatTest extends AbstractChatTest {
 	@Test
 	public void shouldUnlockIfReloginWithSameJID() {
 		session.logout();
-		session.login(XmppURI.uri(USER_URI.getNode(), USER_URI.getHost(), "different_resource"), "");
+		session.login(XmppURI.uri_or_null(USER_URI.getNode(), USER_URI.getHost(), "different_resource"), "");
 		assertEquals("ready", pairChat.getChatState());
 	}
 

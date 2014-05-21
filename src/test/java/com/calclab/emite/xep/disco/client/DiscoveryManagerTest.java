@@ -61,7 +61,7 @@ public class DiscoveryManagerTest {
 
 	@Test
 	public void shouldSendInfoQuery() {
-		final XmppURI uri = XmppURI.uri("node", "localhost.localdomain", "resource");
+		final XmppURI uri = XmppURI.uri_or_null("node", "localhost.localdomain", "resource");
 		final DiscoveryInfoResultTestHandler handler = new DiscoveryInfoResultTestHandler();
 		manager.sendInfoQuery(uri, handler);
 		session.answer(DISCO_RESULT);
@@ -75,7 +75,7 @@ public class DiscoveryManagerTest {
 
 	@Test
 	public void shouldSendItemsQuery() {
-		final XmppURI uri = XmppURI.uri("node", "localhost.localdomain", "resource");
+		final XmppURI uri = XmppURI.uri_or_null("node", "localhost.localdomain", "resource");
 		final DiscoveryItemsResultTestHandler handler = new DiscoveryItemsResultTestHandler();
 		manager.sendItemsQuery(uri, handler);
 		session.answer(DISCO_ITEMS_RESULT);

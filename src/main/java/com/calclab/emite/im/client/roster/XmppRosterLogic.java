@@ -67,6 +67,10 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 				if (event.is(SessionStates.loggedIn)) {
 					reRequestRoster();
 				}
+				
+				if(SessionStates.isDisconnected(event.getState())) {
+					rosterReady = false;
+				}
 			}
 		});
 
@@ -88,16 +92,19 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 
 				final boolean wasAvailable = item.getAvailableResources().contains(resource);
 
-				if (type == Presence.Type.unavailable) {
+				if (type == Presence.Type.unavailable ||
+					type == Presence.Type.error) {
 					if (wasAvailable) {
 						hasChanged = true;
 						item.setAvailable(false, resource);
 					}
-				} else {
+				} else if (type == null) {
 					if (!wasAvailable) {
 						hasChanged = true;
 						item.setAvailable(true, resource);
 					}
+				} else {
+					return; // Do not try to process other stanzas.
 				}
 				final Show showReceived = presence.getShow();
 				final Show newShow = showReceived == null ? Show.notSpecified : showReceived;
@@ -256,22 +263,32 @@ public class XmppRosterLogic extends XmppRosterGroupsLogic {
 
 	}
 
-	private void handleItemChanged(final RosterItem item) {
+	private void handleItemChanged(final RosterItem item, final boolean fireEvents) {
 		final RosterItem old = getItemByJID(item.getJID());
 
 		if (old == null) { // new item
 			storeItem(item);
-			eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.added, item));
+			if (fireEvents) {
+				eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.added, item));
+			}
 		} else { // update or remove
 			final SubscriptionState subscriptionState = item.getSubscriptionState();
 			if (subscriptionState == SubscriptionState.remove) {
 				removeItem(old);
-				eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.removed, old));
+				if (fireEvents) {
+					eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.removed, old));
+				}
 			} else {
 				updateExistingItem(old, item);
-				eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.modified, old));
+				if (fireEvents) {
+					eventBus.fireEvent(new RosterItemChangedEvent(ChangeTypes.modified, old));
+				}
 			}
 		}
+	}
+
+	private void handleItemChanged(final RosterItem item) {
+		handleItemChanged(item, true);
 	}
 
 	private void removeItem(final RosterItem item) {
